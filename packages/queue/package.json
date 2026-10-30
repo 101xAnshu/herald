@@ -15,6 +15,7 @@
   "dependencies": {
     "@herald/config": "workspace:*",
     "@herald/contracts": "workspace:*",
+    "@herald/core": "workspace:*",
     "@herald/observability": "workspace:*",
     "kafkajs": "^2.2.4"
   }

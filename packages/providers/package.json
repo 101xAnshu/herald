@@ -20,6 +20,7 @@
     "nodemailer": "^10.3.0"
   },
   "devDependencies": {
+    "@herald/testing": "workspace:*",
     "@types/nodemailer": "^8.0.2"
   }
 }

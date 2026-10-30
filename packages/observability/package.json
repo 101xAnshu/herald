@@ -13,6 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@herald/config": "workspace:*",
     "pino": "^10.4.0",
     "prom-client": "^15.1.3"
   }
