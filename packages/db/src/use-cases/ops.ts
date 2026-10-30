@@ -159,11 +159,18 @@ export const replayDlq = async (
       });
 
       if (delivery) {
+        const lastAttempt = await tx.deliveryAttempt.findFirst({
+          where: { deliveryId: delivery.id },
+          orderBy: { attempt: "desc" },
+          select: { attempt: true },
+        });
+        const nextAttempt = (lastAttempt?.attempt ?? 0) + 1;
+
         await tx.delivery.update({
           where: { id: delivery.id },
           data: {
             status: "RETRY_SCHEDULED",
-            attemptCount: 0,
+            attemptCount: nextAttempt - 1,
             nextAttemptAt: new Date(),
             failedAt: null,
           },
@@ -176,10 +183,10 @@ export const replayDlq = async (
             deliveryId: delivery.id,
             channel: delivery.channel,
             dueAt: new Date(),
-            attempt: 1,
+            attempt: nextAttempt,
             state: "PENDING",
           },
-          update: { dueAt: new Date(), attempt: 1, state: "PENDING" },
+          update: { dueAt: new Date(), attempt: nextAttempt, state: "PENDING" },
         });
       }
     }

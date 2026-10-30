@@ -94,8 +94,15 @@ export const processDelivery = async (
     };
   }
 
+  const staleSending = new Date(Date.now() - 2 * 60_000);
   const claimed = await db.delivery.updateMany({
-    where: { id: delivery.id, status: { in: ["PENDING", "RETRY_SCHEDULED"] } },
+    where: {
+      id: delivery.id,
+      OR: [
+        { status: { in: ["PENDING", "RETRY_SCHEDULED"] } },
+        { status: "SENDING", updatedAt: { lte: staleSending } },
+      ],
+    },
     data: { status: "SENDING" },
   });
 

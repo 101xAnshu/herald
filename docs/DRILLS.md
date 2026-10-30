@@ -112,3 +112,24 @@ This removes the standby volume. The default Postgres volume is not removed by t
 - A real RPO and RTO target agreed with the business.
 - A test that runs the drill on a schedule against a disposable environment.
 - A post-drill audit record with the operator, time, observed lag, and data loss.
+
+## Recorded run
+
+A local run on 2026-10-30 produced:
+
+| Field | Value |
+|---|---|
+| Notifications before | 1003 |
+| Notifications after | 1004 |
+| Replication lag before promotion | 0.000043s |
+| Promotion time | under 1s |
+| Unpublished outbox rows after replay | 0 |
+| New event on promoted node | accepted, then delivered |
+
+The promotion completed before the one second timestamp resolution, so the report
+shows zero for promotion time. Application RTO is reported separately by the
+script. On this machine the API and worker were ready against the promoted node
+within a few seconds.
+
+This is a local observation, not a production SLA. The host was a laptop with the
+default single-shard stack.

@@ -51,6 +51,8 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 
+DRILL_START=$(date +%s)
+
 echo "3/7 stop application writers"
 docker compose stop api worker >/dev/null 2>&1 || true
 
@@ -78,6 +80,9 @@ for _ in $(seq 1 60); do
   sleep 2
 done
 
+DRILL_READY=$(date +%s)
+APP_RTO=$((DRILL_READY - DRILL_START))
+
 echo "6/7 publish a new event and replay the outbox"
 EVENT=$(curl -fsS -X POST http://localhost:3001/v1/events \
   -H "authorization: Bearer $BOOKING_KEY" \
@@ -103,7 +108,8 @@ cat > "$RESULT" <<REPORT
 - Notifications before: $BEFORE
 - Notifications after: $AFTER
 - Replication lag before promotion: ${LAG:-unknown}s
-- Promotion RTO: ${RTO}s
+- Promotion time: ${RTO}s
+- Application RTO: ${APP_RTO}s
 - Unpublished outbox rows after replay: ${PENDING:-unknown}
 - New event response: ${EVENT:-none}
 
