@@ -155,7 +155,7 @@ export const replayDlq = async (
     if (found.record.deliveryId) {
       const delivery = await tx.delivery.findUnique({
         where: { id: found.record.deliveryId },
-        select: { id: true, channel: true },
+        select: { id: true },
       });
 
       if (delivery) {
@@ -176,18 +176,6 @@ export const replayDlq = async (
           },
         });
 
-        await tx.retrySchedule.upsert({
-          where: { deliveryId: delivery.id },
-          create: {
-            id: newId(),
-            deliveryId: delivery.id,
-            channel: delivery.channel,
-            dueAt: new Date(),
-            attempt: nextAttempt,
-            state: "PENDING",
-          },
-          update: { dueAt: new Date(), attempt: nextAttempt, state: "PENDING" },
-        });
       }
     }
 
