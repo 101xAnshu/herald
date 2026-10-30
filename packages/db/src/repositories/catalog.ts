@@ -9,7 +9,7 @@ import {
   type Source,
   type UpdateEventType,
 } from "@herald/contracts";
-import { AppError } from "@herald/core";
+import { AppError, newId } from "@herald/core";
 import type { Prisma } from "../generated/prisma/client";
 import type { Db } from "../prisma";
 import {
@@ -88,7 +88,7 @@ export const listEventTypes = async (db: Db) =>
 export const createEventType = async (db: Db, input: CreateEventType) => {
   return db.eventType.create({
     data: {
-      id: crypto.randomUUID(),
+      id: newId(),
       key: input.key,
       schema: input.schema as Prisma.InputJsonValue,
       defaultPriority: priorityToDb(input.default_priority as Priority),
@@ -176,7 +176,7 @@ export const findTemplateForRecipient = async (
 export const createTemplate = async (db: Db, input: CreateTemplate) =>
   db.template.create({
     data: {
-      id: crypto.randomUUID(),
+      id: newId(),
       key: input.key,
       channel: channelToDb(input.channel),
       locale: input.locale.toLowerCase(),
@@ -204,7 +204,7 @@ export const createTemplateVersion = async (
 
   return db.templateVersion.create({
     data: {
-      id: crypto.randomUUID(),
+      id: newId(),
       templateId,
       version: (latest?.version ?? 0) + 1,
       subject: input.subject,
