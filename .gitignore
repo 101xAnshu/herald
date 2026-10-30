@@ -1,0 +1,9 @@
+node_modules/
+dist/
+coverage/
+.turbo/
+.env
+*.log
+.DS_Store
+src/generated/prisma/
+packages/db/src/generated/prisma/

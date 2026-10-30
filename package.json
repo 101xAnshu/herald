@@ -1,0 +1,38 @@
+{
+  "name": "herald",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@12.11.2",
+  "description": "Multi-channel notification platform",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/101xAnshu/herald.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "format": "prettier --write .",
+    "db:generate": "pnpm --filter @herald/db prisma:generate",
+    "db:migrate": "pnpm --filter @herald/db prisma:migrate",
+    "db:seed": "pnpm --filter @herald/db prisma:seed"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "dotenv": "^18.0.9",
+    "eslint": "^10.13.0",
+    "prettier": "^3.9.10",
+    "tsx": "^4.23.15",
+    "turbo": "^2.11.10",
+    "typescript": "^7.0.2",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  }
+}

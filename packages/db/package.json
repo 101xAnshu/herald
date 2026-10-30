@@ -1,0 +1,28 @@
+{
+  "name": "@herald/db",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Prisma schema, repositories, shard router",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src --max-warnings 0",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@herald/config": "workspace:*",
+    "@herald/contracts": "workspace:*",
+    "@herald/core": "workspace:*",
+    "@herald/observability": "workspace:*",
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "pg": "^8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "prisma": "8.0.0-rc.28"
+  }
+}

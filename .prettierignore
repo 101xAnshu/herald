@@ -1,0 +1,7 @@
+node_modules
+dist
+coverage
+.turbo
+pnpm-lock.yaml
+site/demo.mp4
+site/demo-poster.jpg
