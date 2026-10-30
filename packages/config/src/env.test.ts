@@ -56,6 +56,8 @@ describe("parseConfig", () => {
       parseConfig({
         ...baseEnv,
         NODE_ENV: "production",
+        JWT_SECRET: "local-development-jwt-secret",
+        API_KEY_PEPPER: "local-development-api-key-pepper",
       }),
     ).toThrow(/JWT_SECRET/);
 

@@ -135,12 +135,18 @@ export const parseConfig = (source: NodeJS.ProcessEnv = process.env): HeraldConf
   }
 
   if (env.NODE_ENV === "production") {
-    if (env.JWT_SECRET === "herald-dev-jwt-secret-change-me") {
-      throw new ConfigError(["JWT_SECRET must be set in production"]);
+    if (
+      env.JWT_SECRET === "herald-dev-jwt-secret-change-me" ||
+      env.JWT_SECRET.startsWith("local-development")
+    ) {
+      throw new ConfigError(["JWT_SECRET must be set to a production value"]);
     }
 
-    if (env.API_KEY_PEPPER === "herald-dev-api-key-pepper") {
-      throw new ConfigError(["API_KEY_PEPPER must be set in production"]);
+    if (
+      env.API_KEY_PEPPER === "herald-dev-api-key-pepper" ||
+      env.API_KEY_PEPPER.startsWith("local-development")
+    ) {
+      throw new ConfigError(["API_KEY_PEPPER must be set to a production value"]);
     }
   }
 

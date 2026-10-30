@@ -19,6 +19,7 @@ demo: deps
 	@until $(COMPOSE) exec -T postgres pg_isready -U herald -d herald >/dev/null 2>&1; do sleep 2; done
 	pnpm --filter @herald/db exec prisma migrate deploy
 	pnpm --filter @herald/db prisma:seed
+	pnpm build
 	$(COMPOSE) up -d --build api worker
 	./scripts/wait-for.sh http://localhost:3000/health/ready 180
 	pnpm herald init --demo
