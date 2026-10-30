@@ -1,0 +1,61 @@
+services:
+  postgres-standby:
+    image: postgres:16-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        rm -rf /var/lib/postgresql/data/*
+        chown -R postgres:postgres /var/lib/postgresql/data
+        until gosu postgres env PGPASSWORD=replicator pg_basebackup -h postgres -D /var/lib/postgresql/data -U replicator -Fp -Xs -P -R; do
+          sleep 2
+        done
+        exec gosu postgres postgres -D /var/lib/postgresql/data -c hot_standby=on
+    ports:
+      - "5435:5432"
+    volumes:
+      - postgres-standby-data:/var/lib/postgresql/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api-dr:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://herald:herald@postgres-standby:5432/herald
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:19092
+      SMTP_URL: smtp://mailpit:1025
+      MAILPIT_URL: http://mailpit:8025
+      JWT_SECRET: ${JWT_SECRET:-local-development-jwt-secret}
+      API_KEY_PEPPER: ${API_KEY_PEPPER:-local-development-api-key-pepper}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-local-development-webhook-secret}
+      DEMO_MODE: "true"
+    ports:
+      - "3001:3000"
+    depends_on:
+      - postgres-standby
+
+  worker-dr:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://herald:herald@postgres-standby:5432/herald
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:19092
+      SMTP_URL: smtp://mailpit:1025
+      MAILPIT_URL: http://mailpit:8025
+      JWT_SECRET: ${JWT_SECRET:-local-development-jwt-secret}
+      API_KEY_PEPPER: ${API_KEY_PEPPER:-local-development-api-key-pepper}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-local-development-webhook-secret}
+      DEMO_MODE: "true"
+    depends_on:
+      - postgres-standby
+
+volumes:
+  postgres-standby-data:

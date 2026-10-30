@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Herald: notification delivery without the lost-event problem</title>
+    <meta
+      name="description"
+      content="Herald is a multi-channel notification platform: durable ingest, policy, fanout, retries, campaigns, and an in-app inbox in one local stack."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <a class="brand" href="#top">
+        <span class="brand-mark">H</span>
+        <span>Herald</span>
+      </a>
+      <nav>
+        <a href="#architecture">Architecture</a>
+        <a href="#features">Features</a>
+        <a href="#quickstart">Quickstart</a>
+        <a href="https://github.com/101xAnshu/herald">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <p class="eyebrow">Transactional notifications · campaigns · in-app inbox</p>
+        <h1>Send the message once.<br />Know exactly what happened next.</h1>
+        <p class="lede">
+          Herald accepts a business event, commits it with an outbox row, resolves policy per
+          recipient, splits fanout by priority, and carries every delivery to a traceable terminal
+          state. No lost events, no silent retries, no dashboard required to see the truth.
+        </p>
+        <div class="hero-actions">
+          <a class="button" href="#quickstart">Run it locally</a>
+          <a class="button ghost" href="https://github.com/101xAnshu/herald">Read the source</a>
+        </div>
+
+        <div class="terminal" aria-label="Quickstart terminal">
+          <div class="terminal-bar"><span></span><span></span><span></span></div>
+          <pre><code><span class="prompt">$</span> git clone https://github.com/101xAnshu/herald.git
+<span class="prompt">$</span> cd herald && pnpm install
+<span class="prompt">$</span> make demo
+<span class="prompt">$</span> pnpm herald demo
+
+<span class="muted"># accepted 0199f3f2-7d4a-7c3e-9b1a-2f6e5d4c3b2a</span>
+<span class="muted"># email accepted · in-app delivered · push accepted</span></pre>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="Design envelope">
+        <div><strong>10M</strong><span>events per day on the demo profile</span></div>
+        <div><strong>300M</strong><span>daily events in the design envelope</span></div>
+        <div><strong>&lt;150ms</strong><span>ingest p95 target</span></div>
+        <div><strong>0</strong><span>accepted events lost to a broker restart</span></div>
+      </section>
+
+      <section id="architecture" class="section">
+        <div class="section-head">
+          <p class="eyebrow">One durable path</p>
+          <h2>Accept first. Decide later.</h2>
+          <p>
+            Ingest does one thing: resolve the recipient, check idempotency, and commit the
+            notification, timeline event, and outbox row together. Everything expensive happens
+            after the producer gets a 202.
+          </p>
+        </div>
+
+        <div class="flow">
+          <div class="flow-step">
+            <span class="step">01</span>
+            <h3>Producer</h3>
+            <p>Business event with a stable idempotency key.</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <span class="step">02</span>
+            <h3>Ingest</h3>
+            <p>Postgres transaction: notification, timeline, outbox.</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <span class="step">03</span>
+            <h3>Relay</h3>
+            <p><code>FOR UPDATE SKIP LOCKED</code> publishes to Kafka.</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <span class="step">04</span>
+            <h3>Policy</h3>
+            <p>Preferences, quiet hours, caps, suppression, templates.</p>
+          </div>
+          <div class="flow-arrow">→</div>
+          <div class="flow-step">
+            <span class="step">05</span>
+            <h3>Delivery</h3>
+            <p>Token bucket, provider attempt, retry or terminal state.</p>
+          </div>
+        </div>
+
+        <div class="split">
+          <div>
+            <h3>Priority is topology, not a promise</h3>
+            <p>
+              Critical, high, normal, and low work each get their own Kafka topic and consumer
+              group. A campaign cannot starve a security alert because they do not share a queue.
+            </p>
+          </div>
+          <div>
+            <h3>Redis accelerates. Postgres decides.</h3>
+            <p>
+              Dedupe, rate limits, and token buckets live in Redis. If Redis disappears, limits
+              reset and dedupe falls back to the unique constraint. Accepted work is still safe.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="section-head">
+          <p class="eyebrow">What is actually built</p>
+          <h2>Small surface. Real failure paths.</h2>
+        </div>
+        <div class="grid">
+          <article>
+            <h3>Transactional outbox</h3>
+            <p>
+              A committed notification is never acknowledged before its publish intent is durable.
+              The relay replays unpublished rows after a crash or a database promotion.
+            </p>
+          </article>
+          <article>
+            <h3>Policy snapshots</h3>
+            <p>
+              Every fanout decision stores the policy hash, the channels considered, and the reason
+              each one was allowed or suppressed. Weeks later the trace still explains itself.
+            </p>
+          </article>
+          <article>
+            <h3>Retries with full jitter</h3>
+            <p>
+              30 second base, 30 minute cap, per-channel attempt budgets. Permanent errors go
+              straight to failure. Ambiguous timeouts become <code>unknown</code>, not blind
+              retries.
+            </p>
+          </article>
+          <article>
+            <h3>Campaigns on the same pipeline</h3>
+            <p>
+              The runner calls the ingest service, not a shortcut. Pause stops the next batch.
+              Resume continues from the next pending recipient. The funnel is derived, not guessed.
+            </p>
+          </article>
+          <article>
+            <h3>Durable inbox and SSE</h3>
+            <p>
+              In-app delivery commits the inbox row and the delivery state together. Connected
+              clients get a live event; offline clients get the same row on reconnect.
+            </p>
+          </article>
+          <article>
+            <h3>Narrow failover drill</h3>
+            <p>
+              Streaming replication, standby promotion, application restart, and outbox replay. It
+              proves the data plane and says plainly what it does not prove.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section id="quickstart" class="section quickstart">
+        <div>
+          <p class="eyebrow">Local, not mocked</p>
+          <h2>One command boots the real path.</h2>
+          <p>
+            Postgres, Redis, Kafka, Mailpit, the API, and the worker. Six partitions per priority
+            topic. A seeded 2,200-user Marlowe dataset. A campaign that pauses at 400 recipients and
+            resumes.
+          </p>
+          <ul class="checklist">
+            <li>Email arrives in Mailpit over SMTP.</li>
+            <li>In-app events stream over SSE.</li>
+            <li>Push and SMS use deterministic mock outcomes.</li>
+            <li><code>herald trace</code> follows one notification end to end.</li>
+          </ul>
+        </div>
+        <pre class="code-card"><code>make demo
+pnpm herald init --demo
+pnpm herald doctor
+
+pnpm herald send booking.confirmed \
+  --user cust_00001 \
+  --data '{"booking_id":"bkg_8821","service":"plumbing","pro_name":"Ravi","scheduled_for":"2026-11-02T10:00:00+05:30","address_label":"Home"}'
+
+pnpm herald campaign list
+pnpm herald campaign watch &lt;id&gt;
+pnpm herald stats</code></pre>
+      </section>
+    </main>
+
+    <footer>
+      <span>Herald</span>
+      <span>MIT licensed · Node · Postgres · Kafka · Redis</span>
+      <a href="https://github.com/101xAnshu/herald">github.com/101xAnshu/herald</a>
+    </footer>
+  </body>
+</html>

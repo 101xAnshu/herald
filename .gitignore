@@ -7,3 +7,6 @@ coverage/
 .DS_Store
 src/generated/prisma/
 packages/db/src/generated/prisma/
+.herald/
+drill-results/
+bench-results/

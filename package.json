@@ -18,11 +18,19 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "test:integration": "turbo run test:integration",
+    "test:integration": "./scripts/test-integration.sh",
     "format": "prettier --write .",
     "db:generate": "pnpm --filter @herald/db prisma:generate",
     "db:migrate": "pnpm --filter @herald/db prisma:migrate",
-    "db:seed": "pnpm --filter @herald/db prisma:seed"
+    "db:seed": "pnpm --filter @herald/db prisma:seed",
+    "herald": "tsx apps/cli/src/index.ts",
+    "herald:build": "pnpm --filter @herald/cli build",
+    "worker:dev": "pnpm --filter @herald/worker dev",
+    "api:dev": "pnpm --filter @herald/api dev",
+    "test:e2e": "tsx scripts/smoke.ts",
+    "bench": "tsx scripts/bench.ts",
+    "drill:db": "./scripts/drill-db.sh",
+    "site": "python3 -m http.server 8080 --directory site"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
