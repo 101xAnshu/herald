@@ -18,7 +18,11 @@
   "dependencies": {
     "@herald/config": "workspace:*",
     "@herald/contracts": "workspace:*",
+    "@herald/core": "workspace:*",
+    "@herald/db": "workspace:*",
     "@herald/sdk": "workspace:*",
-    "commander": "^15.0.0"
+    "@iarna/toml": "^2.2.5",
+    "commander": "12.1.0",
+    "picocolors": "^1.1.1"
   }
 }
