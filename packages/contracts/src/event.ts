@@ -93,12 +93,14 @@ export const EventTypePolicySchema = z.object({
   marketing: z.boolean().default(false),
   caps: z.partialRecord(ChannelSchema, z.number().int().positive()).optional(),
   cap_action: z.enum(["defer", "suppress"]).default("defer"),
+  template_key: z.string().min(1).optional(),
   locale_template: z.string().optional(),
 });
 
 export const EventTypeDefinitionSchema = z.object({
   key: EventTypeKeySchema,
   schema_version: z.number().int().min(1),
+  schema: z.record(z.string(), z.unknown()).optional(),
   default_priority: PrioritySchema,
   allowed_channels: z.array(ChannelSchema).min(1),
   allowed_sources: z.array(SourceSchema).min(1),

@@ -4,7 +4,7 @@ import { ConfigError, parseConfig } from "./env";
 
 const baseEnv = {
   NODE_ENV: "test",
-  DATABASE_URL: "postgresql://herald:herald@localhost:5432/herald",
+  DATABASE_URL: "postgresql://herald:herald@localhost:5433/herald",
   REDIS_URL: "redis://localhost:6379",
   KAFKA_BROKERS: "localhost:9092,localhost:9093",
   WORKER_ROLES: "relay,delivery",

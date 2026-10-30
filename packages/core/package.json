@@ -13,6 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@herald/contracts": "workspace:*"
+    "@herald/contracts": "workspace:*",
+    "ajv": "^8.20.0"
   }
 }

@@ -181,6 +181,7 @@ export const CampaignCreateSchema = z
     template_id: UuidSchema,
     channel: ChannelSchema,
     audience: AudienceFilterSchema,
+    payload: z.record(z.string(), z.unknown()).optional(),
     scheduled_for: TimestampSchema.nullable().optional(),
     rate_limit: z.number().int().min(1).max(1000).optional(),
   })
@@ -192,6 +193,7 @@ export const CampaignSchema = z.object({
   template_id: UuidSchema,
   channel: ChannelSchema,
   audience: AudienceFilterSchema,
+  payload: z.record(z.string(), z.unknown()),
   scheduled_for: TimestampSchema.nullable(),
   rate_limit: z.number().int(),
   status: CampaignStatusSchema,

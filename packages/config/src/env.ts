@@ -29,7 +29,7 @@ const envSchema = z.object({
   DATABASE_URL: z
     .string()
     .min(1)
-    .default("postgresql://herald:herald@localhost:5432/herald"),
+    .default("postgresql://herald:herald@localhost:5433/herald"),
   SHARD_COUNT: z.coerce.number().int().min(1).default(1),
   SHARD_DATABASE_URLS: z.string().default(""),
 

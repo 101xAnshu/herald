@@ -98,6 +98,7 @@ export const ConsentActionSchema = z.enum(CONSENT_ACTIONS);
 export const TemplateStatusSchema = z.enum(TEMPLATE_STATUSES);
 export const EventTypeStatusSchema = z.enum(EVENT_TYPE_STATUSES);
 export const AuditResultSchema = z.enum(AUDIT_RESULTS);
+export const OutboxStatusSchema = z.enum(OUTBOX_STATUSES);
 
 export type Source = z.infer<typeof SourceSchema>;
 export type Channel = z.infer<typeof ChannelSchema>;
@@ -116,3 +117,4 @@ export type ConsentAction = z.infer<typeof ConsentActionSchema>;
 export type TemplateStatus = z.infer<typeof TemplateStatusSchema>;
 export type EventTypeStatus = z.infer<typeof EventTypeStatusSchema>;
 export type AuditResult = z.infer<typeof AuditResultSchema>;
+export type OutboxStatus = z.infer<typeof OutboxStatusSchema>;
