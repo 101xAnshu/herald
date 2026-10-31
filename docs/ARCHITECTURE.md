@@ -220,6 +220,8 @@ Important values:
 | `REDIS_URL` | `redis://localhost:6379` |
 | `KAFKA_BROKERS` | `localhost:9092` |
 | `KAFKA_PARTITIONS` | `6` |
+| `API_WORKERS` | `1`, `4` in the demo env |
+| `DB_POOL_MAX` | `20` |
 | `WORKER_ROLES` | all roles |
 | `DEMO_MODE` | `true` |
 | `ALLOW_CRITICAL_WHEN_PAUSED` | `true` |

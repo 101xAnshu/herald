@@ -46,7 +46,27 @@ const readDemoEnv = (): Record<string, string> => {
   }
 };
 
+const readDotEnv = (): Record<string, string> => {
+  try {
+    const text = readFileSync(resolve(process.cwd(), ".env"), "utf8");
+    const values: Record<string, string> = {};
+
+    for (const line of text.split("\n")) {
+      const separator = line.indexOf("=");
+
+      if (separator > 0) {
+        values[line.slice(0, separator)] = line.slice(separator + 1).trim();
+      }
+    }
+
+    return values;
+  } catch {
+    return {};
+  }
+};
+
 const demo = readDemoEnv();
+const dotenv = readDotEnv();
 const options: Options = {
   url: option("url", process.env["HERALD_API_URL"] ?? demo["HERALD_API_URL"] ?? "http://localhost:3000"),
   key: option("key", process.env["HERALD_BOOKING_API_KEY"] ?? demo["HERALD_BOOKING_API_KEY"] ?? ""),
@@ -219,6 +239,9 @@ measures the insert path rather than the duplicate fast path.
 | Target rate | ${options.rate} requests/s |
 | Duration | ${options.duration}s |
 | Warmup | ${options.warmup}s |
+| API workers | ${process.env["API_WORKERS"] ?? dotenv["API_WORKERS"] ?? "unknown"} |
+| DB pool max | ${process.env["DB_POOL_MAX"] ?? dotenv["DB_POOL_MAX"] ?? "unknown"} |
+| Worker state | ${option("worker", "unknown")} |
 | Client | in-process autocannon |
 
 ## Result

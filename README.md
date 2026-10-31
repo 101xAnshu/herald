@@ -310,9 +310,17 @@ make verify               # build, lint, typecheck, unit tests, smoke test
 
 ## Scale
 
-The demo profile is sized for a laptop: one Postgres shard, one Kafka broker, one Redis, one API, one worker.
+The demo profile is sized for a laptop: one Postgres shard, one Kafka broker, one Redis, one API container with four Node workers, and one worker process.
 
 The design envelope is 10M events per day locally and 300M events per day with 12 Postgres shards and 48 Kafka partitions per priority topic. `docs/CAPACITY.md` gives the throughput math, storage estimates, and cost assumptions. The capacity numbers are estimates, not a benchmark claim.
+
+## Measured local ingest
+
+With `API_WORKERS=4`, `DB_POOL_MAX=30`, the tuned Postgres settings in `compose.yml`, and the worker stopped, autocannon recorded 753 events/s against a 900 events/s target on the demo laptop. p50 was 45.2 ms, p95 was 93.2 ms, p99 was 130.1 ms, and no request failed. The report is in `docs/BENCH-HTTP.md`.
+
+A separate closed-loop Node client recorded 516 events/s with the same load settings, p50 10.6 ms, p95 77.2 ms, and p99 493.7 ms. Its lower p50 is service time, not queue time. Its p99 is worse because the client, not the API, saturates first. See `docs/BENCH.md`.
+
+The 1,000 events/s target was not reached. At a 1,000 target the API accepted about 729 events/s with p99 180 ms in the best run, and the tail was unstable across repeated runs. The system is close to the CPU limit of this laptop, not to a configurable bottleneck.
 
 ## Deliberate limits
 

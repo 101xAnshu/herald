@@ -97,3 +97,19 @@ Short records for the choices that shape the build.
 **Why.** PostgreSQL partitioned tables require the partition key in every primary and unique key. Prisma relations and the idempotency constraint would need composite keys throughout, which makes the local build harder to read without changing the API contract. The capacity document describes daily partitions and partition drops for the design envelope.
 
 **Consequence.** Local retention deletes rows in batches instead of dropping partitions. At design scale, partitioning is mandatory and the retention job must switch to partition management.
+
+## ADR-013: Four API workers in one container
+
+**Decision.** The API container runs four Node worker processes through `API_WORKERS`, sharing port 3000 through Node cluster.
+
+**Why.** One Node process saturates one core before the database does. Four processes raised measured ingest from about 170 to 753 events/s on the demo laptop with the same services and durability.
+
+**Consequence.** Each worker has its own Prisma pool and metrics registry. `/metrics` returns the counters for one worker, not the sum. The demo environment uses four because the laptop has eight threads.
+
+## ADR-014: One SQL statement for ingest writes
+
+**Decision.** The notification, accepted timeline event, and outbox row are inserted by one data-modifying CTE. The user lookup and the idempotency pre-read are gone. A unique violation and a foreign-key violation are mapped to the existing duplicate and unknown-recipient responses.
+
+**Why.** The previous path used several sequential queries and a transaction round trip per accepted event. The single statement cut the hot path enough to raise measured throughput from about 170 to 729 events/s at a 1,000/s target.
+
+**Consequence.** The insert bypasses Prisma model writes, so it must stay in sync with the table columns. The database unique constraint, not a pre-read, remains the idempotency authority.

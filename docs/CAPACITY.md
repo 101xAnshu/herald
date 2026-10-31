@@ -14,7 +14,7 @@ The numbers here are estimates with stated assumptions. They are not benchmark r
 | Kafka partitions per topic | 6 | 48 |
 | Kafka brokers | 1 | 6 |
 | Redis | 1 node | 3 shards with replicas |
-| API processes | 1 | 8 |
+| API processes | 4 | 8 |
 | Worker processes | 1 | 24 |
 | Hot Postgres retention | 14 days | 14 days |
 | Kafka retention | 24 hours events and deliveries | 72 hours |
@@ -28,7 +28,7 @@ The numbers here are estimates with stated assumptions. They are not benchmark r
 - A campaign targets at most 30M users and runs over hours, not seconds.
 - Peak traffic is 10x the daily average. This covers evening booking peaks and a campaign launch.
 - Provider throughput is the real ceiling for delivery. Herald can enqueue faster than any provider accepts.
-- The local benchmark runs one API process and one worker on a 4 vCPU machine.
+- The local benchmark runs one API container with four Node workers and one worker process on an 8-thread laptop.
 
 ## Throughput math
 
@@ -218,11 +218,13 @@ At 300M events per month, the infrastructure cost is roughly $0.08 per 1,000 eve
 
 `pnpm bench` drives `POST /v1/events` with unique idempotency keys and writes `docs/BENCH.md`. The default run is 50 events/s for 10 seconds, which verifies the business path without saturating a laptop.
 
+The current code was measured on the demo laptop with four API workers, a database pool of 30 per worker, and tuned Postgres settings. Autocannon accepted 753 events/s at a 900/s target with p50 45.2 ms, p95 93.2 ms, and p99 130.1 ms. The 1,000/s target was not reached. See `docs/BENCH-HTTP.md` for the exact run.
+
 `pnpm bench:http` uses autocannon for an HTTP-level saturation run and writes `docs/BENCH-HTTP.md`. It cycles through seeded users and mints a unique idempotency key per request. Use it for the API ceiling; use the other benchmark for outbox and idempotency evidence.
 
 ```bash
 pnpm bench --rate 500 --duration 60 --concurrency 40
-pnpm bench:http --rate 900 --connections 20 --duration 30
+pnpm bench:http --rate 900 --connections 40 --duration 30
 ```
 
 The local rate limiter caps one key and one IP at 1,000 ingest requests per second. `bench:http` defaults below that ceiling. Raise the limiter in a disposable stack before running a higher saturation test.
