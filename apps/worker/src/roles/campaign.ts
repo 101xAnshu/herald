@@ -1,4 +1,4 @@
-import { materializeRecipients, prisma, runCampaignBatch } from "@herald/db";
+import { getCampaignStats, materializeRecipients, prisma, runCampaignBatch } from "@herald/db";
 import { campaignProgress, campaignRecipients, logger } from "@herald/observability";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -26,7 +26,8 @@ export const runCampaignLoop = async (signal: AbortSignal): Promise<void> => {
         }
 
         const result = await runCampaignBatch(prisma, campaign.id);
-        campaignProgress.set(0);
+        const stats = await getCampaignStats(prisma, campaign.id);
+        campaignProgress.set(stats.progress_ratio);
         campaignRecipients.inc({ status: "queued", channel: campaign.channel.toLowerCase() }, result.emitted);
 
         if (result.processed > 0) {

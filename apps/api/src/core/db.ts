@@ -18,7 +18,7 @@ export const migrationsReady = async (): Promise<boolean> => {
       FROM _prisma_migrations
     `;
 
-    return rows.every((row) => row.finished_at !== null || row.rolled_back_at !== null);
+    return rows.length > 0 && rows.every((row) => row.finished_at !== null || row.rolled_back_at !== null);
   } catch {
     return false;
   }

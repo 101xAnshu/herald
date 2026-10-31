@@ -1,5 +1,14 @@
 import { AppError } from "@herald/core";
-import { metricsContentType, metricsText } from "@herald/observability";
+import {
+  dlqDepth,
+  metricsContentType,
+  metricsText,
+  outboxOldestAge,
+  outboxPending,
+  retriesScheduled,
+  sourcePaused,
+} from "@herald/observability";
+import { getOpsStats, listSources } from "@herald/db";
 import cors from "cors";
 import express, { type Express } from "express";
 import helmet from "helmet";
@@ -39,6 +48,22 @@ export const createApp = (): Express => {
   app.use("/health", healthRouter);
 
   app.get("/metrics", async (_req, res) => {
+    const [stats, sources] = await Promise.all([
+      getOpsStats().catch(() => null),
+      listSources().catch(() => []),
+    ]);
+
+    if (stats) {
+      outboxPending.labels("all").set(stats.outbox.pending);
+      outboxOldestAge.labels("all").set(stats.outbox.oldest_age_seconds);
+      dlqDepth.labels("all", "all").set(stats.dlq.depth);
+      retriesScheduled.labels("all").set(stats.retries.due);
+    }
+
+    for (const source of sources) {
+      sourcePaused.labels(source.source).set(source.paused ? 1 : 0);
+    }
+
     res.setHeader("Content-Type", metricsContentType());
     res.send(await metricsText());
   });
