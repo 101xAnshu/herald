@@ -316,11 +316,11 @@ The design envelope is 10M events per day locally and 300M events per day with 1
 
 ## Measured local ingest
 
-With `API_WORKERS=4`, `DB_POOL_MAX=30`, the tuned Postgres settings in `compose.yml`, and the worker stopped, autocannon recorded 753 events/s against a 900 events/s target on the demo laptop. p50 was 45.2 ms, p95 was 93.2 ms, p99 was 130.1 ms, and no request failed. The report is in `docs/BENCH-HTTP.md`.
+With `API_WORKERS=4`, `DB_POOL_MAX=30`, the tuned Postgres settings in `compose.yml`, and the worker stopped, autocannon recorded 711 to 753 events/s against a 900 events/s target on the demo laptop. The committed run delivered 711.4 events/s, p50 46.5 ms, p95 104.3 ms, p99 178.3 ms, with no failed request. The best run reached 753 events/s with p99 130.1 ms. The report is in `docs/BENCH-HTTP.md`.
 
 A separate closed-loop Node client recorded 516 events/s with the same load settings, p50 10.6 ms, p95 77.2 ms, and p99 493.7 ms. Its lower p50 is service time, not queue time. Its p99 is worse because the client, not the API, saturates first. See `docs/BENCH.md`.
 
-The 1,000 events/s target was not reached. At a 1,000 target the API accepted about 729 events/s with p99 180 ms in the best run, and the tail was unstable across repeated runs. The system is close to the CPU limit of this laptop, not to a configurable bottleneck.
+The 1,000 events/s target was not reached. At a 1,000 target the API accepted about 729 events/s with p99 180 ms in the best run, and the tail moved between 130 and 443 ms across repeated runs. The system is close to the CPU limit of this laptop, not to a configurable bottleneck. With four API workers, `/metrics` reports one worker's registry, not the sum; `/v1/ops/stats` reads the database and stays aggregate.
 
 ## Deliberate limits
 

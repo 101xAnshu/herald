@@ -113,3 +113,11 @@ Short records for the choices that shape the build.
 **Why.** The previous path used several sequential queries and a transaction round trip per accepted event. The single statement cut the hot path enough to raise measured throughput from about 170 to 729 events/s at a 1,000/s target.
 
 **Consequence.** The insert bypasses Prisma model writes, so it must stay in sync with the table columns. The database unique constraint, not a pre-read, remains the idempotency authority.
+
+## ADR-015: Invalidate caches over Redis pub/sub
+
+**Decision.** API key, source control, event type, and backlog caches keep short TTLs and also listen on a Redis pub/sub channel. A mutation publishes the affected cache type, and every API worker and the worker process clears its local cache.
+
+**Why.** The first optimization cached these reads for 1 to 5 seconds. That cut database work but let a revoked key or paused source stay active until the TTL expired. Pub/sub removes that window without adding a per-request read.
+
+**Consequence.** If Redis is unavailable, invalidation falls back to the TTL. The API key cache can still outlive a revocation by the TTL in that failure mode. Event type and source changes are immediate while Redis is healthy.

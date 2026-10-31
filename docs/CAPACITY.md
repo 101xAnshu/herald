@@ -218,7 +218,7 @@ At 300M events per month, the infrastructure cost is roughly $0.08 per 1,000 eve
 
 `pnpm bench` drives `POST /v1/events` with unique idempotency keys and writes `docs/BENCH.md`. The default run is 50 events/s for 10 seconds, which verifies the business path without saturating a laptop.
 
-The current code was measured on the demo laptop with four API workers, a database pool of 30 per worker, and tuned Postgres settings. Autocannon accepted 753 events/s at a 900/s target with p50 45.2 ms, p95 93.2 ms, and p99 130.1 ms. The 1,000/s target was not reached. See `docs/BENCH-HTTP.md` for the exact run.
+The current code was measured on the demo laptop with four API workers, a database pool of 30 per worker, and tuned Postgres settings. Autocannon accepted 711 to 753 events/s at a 900/s target. The committed run was 711.4/s with p50 46.5 ms, p95 104.3 ms, and p99 178.3 ms. The 1,000/s target was not reached. See `docs/BENCH-HTTP.md` for the exact run.
 
 `pnpm bench:http` uses autocannon for an HTTP-level saturation run and writes `docs/BENCH-HTTP.md`. It cycles through seeded users and mints a unique idempotency key per request. Use it for the API ceiling; use the other benchmark for outbox and idempotency evidence.
 
