@@ -53,6 +53,11 @@ done
 
 DRILL_START=$(date +%s)
 
+if [[ -z "${LAG:-}" || "$LAG" == "999" ]]; then
+  echo "standby is not streaming; check pg_stat_replication" >&2
+  exit 1
+fi
+
 echo "3/7 stop application writers"
 docker compose stop api worker >/dev/null 2>&1 || true
 
