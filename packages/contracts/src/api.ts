@@ -12,11 +12,6 @@ import {
   UserKindSchema,
 } from "./enums";
 import { PaginationQuerySchema, TimestampSchema, UuidSchema } from "./common";
-import {
-  AcceptedEventSchema,
-  IngestEventSchema,
-  RecipientSchema,
-} from "./event";
 
 const booleanQuery = z
   .enum(["true", "false"])
@@ -318,10 +313,6 @@ export const ApiKeyCreateSchema = z.object({
 export const ApiKeyRotateSchema = z.object({
   overlap_seconds: z.number().int().min(60).max(86_400).default(3600),
 });
-
-export const EventSubmissionSchema = IngestEventSchema;
-export const EventAcceptedSchema = AcceptedEventSchema;
-export const RecipientRefSchema = RecipientSchema;
 
 export type NotificationListQuery = z.infer<typeof NotificationListQuerySchema>;
 export type InboxQuery = z.infer<typeof InboxQuerySchema>;

@@ -41,7 +41,3 @@ export const disconnectPrisma = async (): Promise<void> => {
   await Promise.all([...clients.values()].map((client) => client.$disconnect()));
   clients.clear();
 };
-
-export const resetPrisma = (): void => {
-  clients.clear();
-};

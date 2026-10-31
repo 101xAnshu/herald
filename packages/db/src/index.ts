@@ -4,7 +4,6 @@ export {
   getPrisma,
   getPrismaForUser,
   prisma,
-  resetPrisma,
   type Db,
 } from "./prisma";
 export { shardForUser } from "./shard";
@@ -25,8 +24,6 @@ export {
   priorityToDb,
   recipientStatusFromDb,
   recipientStatusToDb,
-  retryStateFromDb,
-  retryStateToDb,
   sourceFromDb,
   sourceToDb,
   userKindFromDb,

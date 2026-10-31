@@ -1,6 +1,5 @@
-import type { EventTypeDefinition, IngestEvent } from "@herald/contracts";
-import { EVENT_CATALOG } from "@herald/contracts";
-import type { PolicyUser, PreferenceRecord } from "@herald/core";
+import type { IngestEvent } from "@herald/contracts";
+import type { PolicyUser } from "@herald/core";
 
 let counter = 0;
 
@@ -42,22 +41,6 @@ export const makePolicyUser = (overrides: Partial<PolicyUser> = {}): PolicyUser 
   ...overrides,
 });
 
-export const makePreference = (
-  category: string,
-  channel: PreferenceRecord["channel"],
-  enabled = true,
-): PreferenceRecord => ({ category, channel, enabled });
-
-export const eventType = (key: string): EventTypeDefinition => {
-  const definition = EVENT_CATALOG.find((candidate) => candidate.key === key);
-
-  if (!definition) {
-    throw new Error(`Unknown event type ${key}`);
-  }
-
-  return definition;
-};
-
 export const waitFor = async (
   predicate: () => Promise<boolean> | boolean,
   options: { timeoutMs?: number; intervalMs?: number } = {},
@@ -76,10 +59,3 @@ export const waitFor = async (
 
   throw new Error(`Condition not met within ${timeoutMs}ms`);
 };
-
-export const isSuccessEnvelope = (value: unknown): boolean =>
-  typeof value === "object" &&
-  value !== null &&
-  "data" in value &&
-  "trace_id" in value &&
-  typeof (value as { trace_id: unknown }).trace_id === "string";
