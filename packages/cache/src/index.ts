@@ -14,6 +14,13 @@ export interface BucketResult {
   remaining: number;
 }
 
+export interface RateLimitRequest {
+  scope: string;
+  id: string;
+  limit: number;
+  windowSeconds: number;
+}
+
 const RATE_LIMIT_SCRIPT = `
 local current = redis.call('INCR', KEYS[1])
 if current == 1 then
@@ -108,6 +115,36 @@ export class RedisStore {
       remaining: Math.max(0, limit - count),
       resetSeconds: ttlSeconds,
     };
+  }
+
+  async rateLimitMany(requests: readonly RateLimitRequest[]): Promise<RateLimitResult[]> {
+    if (requests.length === 0) {
+      return [];
+    }
+
+    const pipeline = this.client.pipeline();
+
+    for (const request of requests) {
+      const bucket = Math.floor(Date.now() / (request.windowSeconds * 1000));
+      const key = `ratelimit:${request.scope}:${request.id}:${bucket}`;
+      pipeline.eval(RATE_LIMIT_SCRIPT, 1, key, String(request.windowSeconds * 1000));
+    }
+
+    const results = await pipeline.exec();
+
+    return requests.map((request, index) => {
+      const entry = results?.[index];
+      const value = entry?.[1] as [number, number] | undefined;
+      const count = value?.[0] ?? 0;
+      const ttlMs = value?.[1] ?? 1000;
+
+      return {
+        allowed: count <= request.limit,
+        limit: request.limit,
+        remaining: Math.max(0, request.limit - count),
+        resetSeconds: Math.max(1, Math.ceil(ttlMs / 1000)),
+      };
+    });
   }
 
   async takeToken(

@@ -30,6 +30,53 @@ const identify = (req: Request, scope: Scope): string => {
   }
 };
 
+export const rateLimitMany = (
+  limits: ReadonlyArray<{ scope: Scope; limit: number; windowSeconds: number }>,
+) => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const results = await redis().rateLimitMany(
+        limits.map((limit) => ({
+          scope: limit.scope,
+          id: identify(req, limit.scope),
+          limit: limit.limit,
+          windowSeconds: limit.windowSeconds,
+        })),
+      );
+
+      const primary = results[0];
+      const strictest = results.reduce((worst, current) =>
+        current.remaining < worst.remaining ? current : worst,
+      );
+
+      if (primary) {
+        res.setHeader("X-RateLimit-Limit", String(primary.limit));
+        res.setHeader("X-RateLimit-Remaining", String(strictest.remaining));
+        res.setHeader("X-RateLimit-Reset", String(strictest.resetSeconds));
+      }
+
+      const blocked = results.find((result) => !result.allowed);
+
+      if (blocked) {
+        res.setHeader("Retry-After", String(blocked.resetSeconds));
+        throw new AppError("rate_limited", "Rate limit exceeded", 429, {
+          details: { retry_after_seconds: blocked.resetSeconds },
+        });
+      }
+
+      next();
+    } catch (error) {
+      if (error instanceof AppError) {
+        next(error);
+        return;
+      }
+
+      logger.warn({ err: error }, "rate limiter unavailable, allowing request");
+      next();
+    }
+  };
+};
+
 export const rateLimit = (scope: Scope, limit: number, windowSeconds: number) => {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
