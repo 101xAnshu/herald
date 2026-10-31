@@ -15,6 +15,8 @@ describe("parseConfig", () => {
     const config = parseConfig(baseEnv);
 
     expect(config.port).toBe(3000);
+    expect(config.apiWorkers).toBe(1);
+    expect(config.dbPoolMax).toBe(20);
     expect(config.shardCount).toBe(1);
     expect(config.shardDatabaseUrls).toEqual([baseEnv.DATABASE_URL]);
     expect(config.kafkaBrokers).toEqual(["localhost:9092", "localhost:9093"]);

@@ -25,11 +25,13 @@ const booleanValue = (defaultValue: "true" | "false") =>
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  API_WORKERS: z.coerce.number().int().min(1).max(8).default(1),
 
   DATABASE_URL: z
     .string()
     .min(1)
     .default("postgresql://herald:herald@localhost:5433/herald"),
+  DB_POOL_MAX: z.coerce.number().int().min(1).max(100).default(20),
   SHARD_COUNT: z.coerce.number().int().min(1).default(1),
   SHARD_DATABASE_URLS: z.string().default(""),
 
@@ -62,7 +64,9 @@ export interface HeraldConfig {
   readonly isProduction: boolean;
   readonly isTest: boolean;
   readonly port: number;
+  readonly apiWorkers: number;
   readonly databaseUrl: string;
+  readonly dbPoolMax: number;
   readonly shardDatabaseUrls: readonly string[];
   readonly shardCount: number;
   readonly redisUrl: string;
@@ -155,7 +159,9 @@ export const parseConfig = (source: NodeJS.ProcessEnv = process.env): HeraldConf
     isProduction: env.NODE_ENV === "production",
     isTest: env.NODE_ENV === "test",
     port: env.PORT,
+    apiWorkers: env.API_WORKERS,
     databaseUrl: env.DATABASE_URL,
+    dbPoolMax: env.DB_POOL_MAX,
     shardDatabaseUrls: Object.freeze(shardDatabaseUrls),
     shardCount: env.SHARD_COUNT,
     redisUrl: env.REDIS_URL,

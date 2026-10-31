@@ -11,6 +11,20 @@ services:
       - max_wal_senders=5
       - -c
       - hot_standby=on
+      - -c
+      - max_connections=200
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - effective_cache_size=4GB
+      - -c
+      - max_wal_size=4GB
+      - -c
+      - checkpoint_timeout=15min
+      - -c
+      - checkpoint_completion_target=0.9
+      - -c
+      - wal_compression=on
     environment:
       POSTGRES_USER: herald
       POSTGRES_PASSWORD: herald
@@ -86,7 +100,10 @@ services:
     environment:
       NODE_ENV: development
       PORT: 3000
+      API_WORKERS: ${API_WORKERS:-1}
       DATABASE_URL: postgresql://herald:herald@postgres:5432/herald
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      NODE_OPTIONS: ${NODE_OPTIONS:-}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:19092
       SMTP_URL: smtp://mailpit:1025
@@ -118,6 +135,7 @@ services:
     environment:
       NODE_ENV: development
       DATABASE_URL: postgresql://herald:herald@postgres:5432/herald
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:19092
       SMTP_URL: smtp://mailpit:1025

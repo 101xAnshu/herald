@@ -23,7 +23,7 @@ export const getPrisma = (shard = 0): PrismaClient => {
   }
 
   const client = new PrismaClient({
-    adapter: new PrismaPg({ connectionString }),
+    adapter: new PrismaPg({ connectionString, max: config.dbPoolMax }),
   });
 
   clients.set(shard, client);
