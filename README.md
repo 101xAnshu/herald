@@ -303,8 +303,9 @@ It does not include MirrorMaker, a second Kafka, a second Redis, or a regional f
 pnpm test                 # unit tests
 make test-integration     # disposable compose.test.yml stack plus smoke test
 make test-e2e             # smoke test against the running stack
-make bench                # ingest benchmark, writes docs/BENCH.md
-make verify               # build, lint, unit tests, smoke test
+make bench                # business-path benchmark, writes docs/BENCH.md
+make bench-http           # autocannon HTTP benchmark, writes docs/BENCH-HTTP.md
+make verify               # build, lint, typecheck, unit tests, smoke test
 ```
 
 ## Scale

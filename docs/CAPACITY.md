@@ -216,13 +216,16 @@ At 300M events per month, the infrastructure cost is roughly $0.08 per 1,000 eve
 
 ## Benchmark plan
 
-`pnpm bench` drives `POST /v1/events` with unique idempotency keys and writes `docs/BENCH.md`. The default run is 50 events/s for 10 seconds, which verifies the path without saturating a laptop.
+`pnpm bench` drives `POST /v1/events` with unique idempotency keys and writes `docs/BENCH.md`. The default run is 50 events/s for 10 seconds, which verifies the business path without saturating a laptop.
 
-For a meaningful local measurement:
+`pnpm bench:http` uses autocannon for an HTTP-level saturation run and writes `docs/BENCH-HTTP.md`. It cycles through seeded users and mints a unique idempotency key per request. Use it for the API ceiling; use the other benchmark for outbox and idempotency evidence.
 
 ```bash
 pnpm bench --rate 500 --duration 60 --concurrency 40
+pnpm bench:http --rate 900 --connections 20 --duration 30
 ```
+
+The local rate limiter caps one key and one IP at 1,000 ingest requests per second. `bench:http` defaults below that ceiling. Raise the limiter in a disposable stack before running a higher saturation test.
 
 Record the host CPU, memory, Postgres settings, and whether the worker was running. An ingest benchmark with the worker stopped measures the API and outbox write path. A run with the worker running measures the whole pipeline and will be limited by delivery, not ingest.
 

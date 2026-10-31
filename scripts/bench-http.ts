@@ -1,0 +1,270 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { cpus, totalmem } from "node:os";
+import { resolve } from "node:path";
+
+import autocannon from "autocannon";
+
+type AutocannonResult = Awaited<ReturnType<typeof autocannon>>;
+
+interface Options {
+  url: string;
+  key: string;
+  rate: number;
+  connections: number;
+  duration: number;
+  warmup: number;
+  users: number;
+  opsKey: string;
+  json: boolean;
+}
+
+const args = process.argv.slice(2);
+
+const option = (name: string, fallback: string): string => {
+  const index = args.indexOf(`--${name}`);
+  return index === -1 ? fallback : (args[index + 1] ?? fallback);
+};
+
+const flag = (name: string): boolean => args.includes(`--${name}`);
+
+const readDemoEnv = (): Record<string, string> => {
+  try {
+    const text = readFileSync(resolve(process.cwd(), ".herald/demo.env"), "utf8");
+    const values: Record<string, string> = {};
+
+    for (const line of text.split("\n")) {
+      const separator = line.indexOf("=");
+
+      if (separator > 0) {
+        values[line.slice(0, separator)] = line.slice(separator + 1).trim();
+      }
+    }
+
+    return values;
+  } catch {
+    return {};
+  }
+};
+
+const demo = readDemoEnv();
+const options: Options = {
+  url: option("url", process.env["HERALD_API_URL"] ?? demo["HERALD_API_URL"] ?? "http://localhost:3000"),
+  key: option("key", process.env["HERALD_BOOKING_API_KEY"] ?? demo["HERALD_BOOKING_API_KEY"] ?? ""),
+  opsKey: process.env["HERALD_OPS_API_KEY"] ?? demo["HERALD_OPS_API_KEY"] ?? "",
+  rate: Number(option("rate", "900")),
+  connections: Number(option("connections", "20")),
+  duration: Number(option("duration", "15")),
+  warmup: Number(option("warmup", "3")),
+  users: Math.max(1, Math.min(1_000, Number(option("users", "500")))),
+  json: flag("json"),
+};
+
+if (!options.key) {
+  process.stderr.write("missing booking API key; run make demo or herald init --demo\n");
+  process.exit(1);
+}
+
+interface OpsSummary {
+  notifications: Record<string, number>;
+  outbox: { pending: number; oldest_age_seconds: number };
+  dlq: { depth: number };
+  retries: { due: number };
+}
+
+const readOps = async (): Promise<OpsSummary | null> => {
+  if (!options.opsKey) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${options.url}/v1/ops/stats`, {
+      headers: { authorization: `Bearer ${options.opsKey}` },
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = (await response.json()) as { data: OpsSummary };
+    return body.data;
+  } catch {
+    return null;
+  }
+};
+
+const runId = Date.now().toString(36);
+let requestIndex = 0;
+
+const setupRequest = (request: Record<string, unknown>) => {
+  requestIndex += 1;
+  const index = requestIndex;
+  const externalId = `cust_${String((index % options.users) + 1).padStart(5, "0")}`;
+  const payload = JSON.stringify({
+    type: "booking.confirmed",
+    schema_version: 1,
+    recipient: { external_id: externalId },
+    idempotency_key: `bench-http:${runId}:${index}`,
+    data: {
+      booking_id: `bkg_http_${index}`,
+      service: "plumbing",
+      pro_name: "Ravi",
+      scheduled_for: "2026-11-02T10:00:00+05:30",
+      address_label: "Home",
+    },
+  });
+
+  request.body = payload;
+  request.headers = {
+    ...(request.headers as Record<string, string>),
+    "Content-Type": "application/json",
+  };
+
+  return request;
+};
+
+const run = (duration: number, rate: number, connections: number): Promise<AutocannonResult> =>
+  autocannon({
+    url: `${options.url.replace(/\/$/, "")}/v1/events`,
+    method: "POST",
+    headers: { authorization: `Bearer ${options.key}` },
+    connections,
+    duration,
+    overallRate: rate,
+    pipelining: 1,
+    timeout: 15,
+    requests: [{ setupRequest }],
+  });
+
+const percentile = (result: AutocannonResult, key: keyof AutocannonResult["latency"]): number =>
+  Number(result.latency[key] ?? 0);
+
+const reachedTarget = (achieved: number, target: number): boolean => achieved >= target * 0.9;
+
+const main = async (): Promise<void> => {
+  if (options.warmup > 0) {
+    process.stdout.write(`warming up for ${options.warmup}s\n`);
+    await run(options.warmup, Math.min(100, options.rate), Math.min(5, options.connections));
+  }
+
+  const before = await readOps();
+  const cpuBefore = process.cpuUsage();
+  const started = Date.now();
+
+  const result = await run(options.duration, options.rate, options.connections);
+
+  const elapsedSeconds = (Date.now() - started) / 1000;
+  const cpuAfter = process.cpuUsage(cpuBefore);
+  const cpuSeconds = (cpuAfter.user + cpuAfter.system) / 1_000_000;
+  const clientCpuPercent = (cpuSeconds / elapsedSeconds) * 100;
+  const after = await readOps();
+
+  const requestsSent = result["2xx"] + result["4xx"] + result["5xx"];
+  const accepted = result["2xx"];
+  const failed = result["4xx"] + result["5xx"] + result.errors;
+  const passed = failed === 0 && result.errors === 0;
+
+  const report = `# HTTP ingest benchmark
+
+Generated by \`pnpm bench:http\` on ${new Date().toISOString()}.
+
+Autocannon drives \`POST /v1/events\` directly. Each request uses a unique
+idempotency key and cycles through ${options.users} seeded recipients, so the run
+measures the insert path rather than the duplicate fast path.
+
+## Load
+
+| Field | Value |
+|---|---|
+| Host | ${cpus()[0]?.model ?? "unknown"}, ${cpus().length} vCPU |
+| Memory | ${(totalmem() / 1024 ** 3).toFixed(1)} GiB |
+| API | ${options.url} |
+| Connections | ${options.connections} |
+| Pipelining | 1 |
+| Target rate | ${options.rate} requests/s |
+| Duration | ${options.duration}s |
+| Warmup | ${options.warmup}s |
+| Client | in-process autocannon |
+
+## Result
+
+| Field | Value |
+|---|---|
+| Requests sent | ${requestsSent} |
+| Accepted (2xx) | ${accepted} |
+| Rejected (4xx) | ${result["4xx"]} |
+| Server errors (5xx) | ${result["5xx"]} |
+| Connection errors | ${result.errors} |
+| Timeouts | ${result.timeouts} |
+| Throughput | ${result.requests.average.toFixed(1)} requests/s |
+| p50 latency | ${percentile(result, "p50").toFixed(1)} ms |
+| p90 latency | ${percentile(result, "p90").toFixed(1)} ms |
+| p97.5 latency | ${percentile(result, "p97_5").toFixed(1)} ms |
+| p99 latency | ${percentile(result, "p99").toFixed(1)} ms |
+| Max latency | ${percentile(result, "max").toFixed(1)} ms |
+| Client CPU | ${clientCpuPercent.toFixed(1)}% of one core |
+
+## Pipeline state
+
+| Metric | Before | After |
+|---|---|---|
+| Outbox pending | ${before?.outbox.pending ?? "n/a"} | ${after?.outbox.pending ?? "n/a"} |
+| Outbox oldest (s) | ${before?.outbox.oldest_age_seconds ?? "n/a"} | ${after?.outbox.oldest_age_seconds ?? "n/a"} |
+| DLQ depth | ${before?.dlq.depth ?? "n/a"} | ${after?.dlq.depth ?? "n/a"} |
+| Due retries | ${before?.retries.due ?? "n/a"} | ${after?.retries.due ?? "n/a"} |
+| Notifications | ${before ? JSON.stringify(before.notifications) : "n/a"} | ${after ? JSON.stringify(after.notifications) : "n/a"} |
+
+## Reading
+
+This is an HTTP-level benchmark. It does not wait for fanout or delivery, and it
+does not prove that the async pipeline kept up. Run it with the worker stopped to
+isolate ingest, or leave the worker running to measure the full pipeline's effect
+on ingest latency.
+
+The default local rate limiter allows 1,000 ingest requests per second per key and
+per IP. A run above that rate will show 4xx responses from the limiter rather than
+an API ceiling. The default target stays below it on purpose.
+
+The result is ${passed ? "clean: every request received a 2xx response" : "not clean: inspect 4xx, 5xx, or connection errors before quoting these numbers"}.
+${reachedTarget(result.requests.average, options.rate) ? "" : "The API did not reach the target rate. The throughput figures are the observed ceiling for this host, connection count, and database latency, not the requested rate."}
+`;
+
+  if (options.json) {
+    process.stdout.write(
+      `${JSON.stringify(
+        {
+          target_rate: options.rate,
+          connections: options.connections,
+          duration: options.duration,
+          requests: requestsSent,
+          accepted,
+          rejected: result["4xx"],
+          server_errors: result["5xx"],
+          errors: result.errors,
+          p50_ms: percentile(result, "p50"),
+          p90_ms: percentile(result, "p90"),
+          p97_5_ms: percentile(result, "p97_5"),
+          p99_ms: percentile(result, "p99"),
+          throughput: result.requests.average,
+          client_cpu_percent: clientCpuPercent,
+          passed,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+  }
+
+  const path = resolve(process.cwd(), "docs/BENCH-HTTP.md");
+  writeFileSync(path, report);
+  process.stdout.write(report);
+  process.stdout.write(`\nwrote ${path}\n`);
+
+  if (!passed) {
+    process.exitCode = 1;
+  }
+};
+
+main().catch((error: unknown) => {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  process.exitCode = 1;
+});
