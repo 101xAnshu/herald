@@ -3,8 +3,23 @@ import { randomBytes } from "node:crypto";
 import type { ApiKeyCreate, ApiKeyRotate, Scope, Source } from "@herald/contracts";
 import { AppError, constantTimeEqual, newId, hashToken } from "@herald/core";
 import { loadConfig } from "@herald/config";
+import type { Source as DbSource } from "../generated/prisma/enums";
 import type { Db } from "../prisma";
 import { scopesFromDb, sourceFromDb, sourceToDb } from "../mappers";
+
+interface CachedApiClient {
+  id: string;
+  source: DbSource;
+  scopes: string[];
+  name: string;
+  keyHash: string;
+  expiresAt: Date | null;
+  revokedAt: Date | null;
+  lastUsedAt: Date | null;
+}
+
+const apiKeyCache = new Map<string, { client: CachedApiClient; expiresAt: number }>();
+const API_KEY_CACHE_TTL_MS = 5_000;
 
 export interface IssuedApiKey {
   id: string;
@@ -25,6 +40,7 @@ export const issueApiKey = async (
   input: ApiKeyCreate,
   actor: string,
 ): Promise<IssuedApiKey> => {
+  apiKeyCache.clear();
   const config = loadConfig();
   const raw = generateKey(input.source);
   const id = newId();
@@ -73,7 +89,28 @@ export const issueApiKey = async (
 export const authenticateApiKey = async (db: Db, raw: string) => {
   const config = loadConfig();
   const prefix = prefixOf(raw);
-  const client = await db.apiClient.findUnique({ where: { keyPrefix: prefix } });
+  const cached = apiKeyCache.get(prefix);
+  let client: CachedApiClient | null = null;
+
+  if (cached && cached.expiresAt > Date.now()) {
+    client = cached.client;
+  } else {
+    const row = await db.apiClient.findUnique({ where: { keyPrefix: prefix } });
+
+    if (row) {
+      client = {
+        id: row.id,
+        source: row.source,
+        scopes: row.scopes,
+        name: row.name,
+        keyHash: row.keyHash,
+        expiresAt: row.expiresAt,
+        revokedAt: row.revokedAt,
+        lastUsedAt: row.lastUsedAt,
+      };
+      apiKeyCache.set(prefix, { client, expiresAt: Date.now() + API_KEY_CACHE_TTL_MS });
+    }
+  }
 
   if (!client) {
     return null;
@@ -92,6 +129,7 @@ export const authenticateApiKey = async (db: Db, raw: string) => {
   }
 
   if (!client.lastUsedAt || now.getTime() - client.lastUsedAt.getTime() > 60_000) {
+    client.lastUsedAt = now;
     void db.apiClient
       .update({ where: { id: client.id }, data: { lastUsedAt: now } })
       .catch(() => undefined);
@@ -111,6 +149,7 @@ export const rotateApiKey = async (
   input: ApiKeyRotate,
   actor: string,
 ): Promise<IssuedApiKey> => {
+  apiKeyCache.clear();
   const config = loadConfig();
   const existing = await db.apiClient.findUnique({ where: { id } });
 
@@ -174,6 +213,7 @@ export const rotateApiKey = async (
 };
 
 export const revokeApiKey = async (db: Db, id: string, actor: string) => {
+  apiKeyCache.clear();
   const existing = await db.apiClient.findUnique({ where: { id } });
 
   if (!existing) {

@@ -8,10 +8,9 @@ import {
   userIdFromExternalId,
   validateJsonSchema,
 } from "@herald/core";
-import type { Prisma } from "../generated/prisma/client";
 import { getPrismaForUser } from "../prisma";
 import { shardForUser } from "../shard";
-import { priorityToDb, sourceToDb } from "../mappers";
+import { sourceToDb } from "../mappers";
 import { getEventType } from "../repositories/catalog";
 
 export interface IngestInput {
@@ -30,20 +29,35 @@ export interface IngestResult {
 
 const topicFor = (priority: Priority): string => `herald.events.${priority}.v1`;
 
+const sourceControlCache = new Map<Source, { paused: boolean; expiresAt: number }>();
+const SOURCE_CONTROL_TTL_MS = 1_000;
+const backlogCache = new Map<number, { pending: number; oldestAgeSeconds: number; expiresAt: number }>();
+const BACKLOG_CACHE_TTL_MS = 500;
+
+const isSourcePaused = async (db: ReturnType<typeof getPrismaForUser>, source: Source) => {
+  const cached = sourceControlCache.get(source);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.paused;
+  }
+
+  const row = await db.sourceControl.findUnique({ where: { source: sourceToDb(source) } });
+  const paused = row?.paused ?? false;
+
+  sourceControlCache.set(source, { paused, expiresAt: Date.now() + SOURCE_CONTROL_TTL_MS });
+  return paused;
+};
+
 export const ingestEvent = async (input: IngestInput): Promise<IngestResult> => {
   const config = loadConfig();
   const userId = userIdFromExternalId(input.event.recipient.external_id);
   const db = getPrismaForUser(userId);
+  const shard = shardForUser(userId, config.shardCount);
 
-  const user = await db.user.findUnique({ where: { id: userId }, select: { id: true } });
-
-  if (!user) {
-    throw new AppError("unknown_recipient", "Recipient not found", 422, {
-      details: { external_id: input.event.recipient.external_id },
-    });
-  }
-
-  const eventType = await getEventType(db, input.event.type, input.event.schema_version);
+  const [eventType, sourcePaused] = await Promise.all([
+    getEventType(db, input.event.type, input.event.schema_version),
+    isSourcePaused(db, input.source),
+  ]);
 
   if (!eventType) {
     throw new AppError("validation_failed", "Unknown event type or schema version", 422, {
@@ -84,10 +98,9 @@ export const ingestEvent = async (input: IngestInput): Promise<IngestResult> => 
 
   const priority = priorityResult.priority;
   const source = sourceToDb(input.source);
-  const sourceControl = await db.sourceControl.findUnique({ where: { source } });
 
   if (
-    sourceControl?.paused &&
+    sourcePaused &&
     !(config.allowCriticalWhenPaused && priority === "critical")
   ) {
     throw new AppError("source_paused", "Source is paused", 409, {
@@ -103,41 +116,31 @@ export const ingestEvent = async (input: IngestInput): Promise<IngestResult> => 
     priority: input.event.priority ?? null,
   });
 
-  const existing = await db.notification.findUnique({
-    where: {
-      userId_source_idempotencyKey: {
-        userId,
-        source,
-        idempotencyKey: input.event.idempotency_key,
-      },
-    },
-  });
+  const cachedBacklog = backlogCache.get(shard);
+  let pendingCount: number;
+  let oldestAgeSeconds: number;
 
-  if (existing) {
-    if (existing.requestHash !== hash) {
-      throw new AppError("idempotency_conflict", "Idempotency key reused with a different payload", 409);
-    }
+  if (cachedBacklog && cachedBacklog.expiresAt > Date.now()) {
+    pendingCount = cachedBacklog.pending;
+    oldestAgeSeconds = cachedBacklog.oldestAgeSeconds;
+  } else {
+    const [backlog] = await db.$queryRaw<
+      Array<{ pending: number; oldest_age_seconds: number }>
+    >`
+      SELECT count(*)::int AS pending,
+             COALESCE(EXTRACT(EPOCH FROM (now() - min(created_at))), 0)::int AS oldest_age_seconds
+      FROM outbox
+      WHERE status = 'pending'
+    `;
 
-    return {
-      notificationId: existing.id,
-      status: "accepted",
-      traceId: input.traceId,
-      duplicate: true,
-    };
+    pendingCount = backlog?.pending ?? 0;
+    oldestAgeSeconds = backlog?.oldest_age_seconds ?? 0;
+    backlogCache.set(shard, {
+      pending: pendingCount,
+      oldestAgeSeconds,
+      expiresAt: Date.now() + BACKLOG_CACHE_TTL_MS,
+    });
   }
-
-  const [pendingCount, oldest] = await Promise.all([
-    db.outbox.count({ where: { status: "PENDING" } }),
-    db.outbox.findFirst({
-      where: { status: "PENDING" },
-      orderBy: { createdAt: "asc" },
-      select: { createdAt: true },
-    }),
-  ]);
-
-  const oldestAgeSeconds = oldest
-    ? Math.floor((Date.now() - oldest.createdAt.getTime()) / 1000)
-    : 0;
 
   if (
     pendingCount > config.outboxMaxPendingRows ||
@@ -150,7 +153,6 @@ export const ingestEvent = async (input: IngestInput): Promise<IngestResult> => 
 
   const now = new Date();
   const notificationId = newId();
-  const shard = shardForUser(userId, config.shardCount);
 
   const payload = {
     notification_id: notificationId,
@@ -166,92 +168,76 @@ export const ingestEvent = async (input: IngestInput): Promise<IngestResult> => 
     created_at: now.toISOString(),
   } satisfies Record<string, unknown>;
 
+  const eventId = newId();
+  const outboxId = newId();
+  const eventData = {
+    source: input.source,
+    priority,
+    event_type: input.event.type,
+    trace_id: input.traceId,
+  };
+  const headers = {
+    trace_id: input.traceId,
+    notification_id: notificationId,
+    priority,
+    source: input.source,
+    schema_version: input.event.schema_version,
+    shard,
+  };
+
   try {
-    await db.$transaction(async (tx) => {
-      const raced = await tx.notification.findUnique({
-        where: {
-          userId_source_idempotencyKey: {
-            userId,
-            source,
-            idempotencyKey: input.event.idempotency_key,
-          },
-        },
-      });
-
-      if (raced) {
-        if (raced.requestHash !== hash) {
-          throw new AppError(
-            "idempotency_conflict",
-            "Idempotency key reused with a different payload",
-            409,
-          );
-        }
-
-        return;
-      }
-
-      await tx.notification.create({
-        data: {
-          id: notificationId,
-          userId,
-          source,
-          eventType: input.event.type,
-          eventVersion: input.event.schema_version,
-          priority: priorityToDb(priority),
-          idempotencyKey: input.event.idempotency_key,
-          requestHash: hash,
-          payload: input.event.data as Prisma.InputJsonValue,
-          traceId: input.traceId,
-          createdAt: now,
-        },
-      });
-
-      await tx.notificationEvent.create({
-        data: {
-          id: newId(),
-          notificationId,
-          kind: "accepted",
-          actor: input.actor ?? "api",
-          data: {
-            source: input.source,
-            priority,
-            event_type: input.event.type,
-            trace_id: input.traceId,
-          },
-          createdAt: now,
-        },
-      });
-
-      await tx.outbox.create({
-        data: {
-          id: newId(),
-          aggregateType: "notification",
-          aggregateId: notificationId,
-          shard,
-          topic: topicFor(priority),
-          partitionKey: userId,
-          payload: payload as Prisma.InputJsonValue,
-          headers: {
-            trace_id: input.traceId,
-            notification_id: notificationId,
-            priority,
-            source: input.source,
-            schema_version: input.event.schema_version,
-            shard,
-          },
-          createdAt: now,
-          availableAt: now,
-        },
-      });
-    });
+    await db.$queryRaw<Array<{ id: string }>>`
+      WITH created AS (
+        INSERT INTO notifications (
+          id, user_id, source, event_type, event_version, priority, status,
+          idempotency_key, request_hash, payload, trace_id, created_at, updated_at
+        )
+        VALUES (
+          ${notificationId}, ${userId}, ${input.source}::"source", ${input.event.type},
+          ${input.event.schema_version}, ${priority}::"priority", 'accepted'::"notification_status",
+          ${input.event.idempotency_key}, ${hash}, ${JSON.stringify(input.event.data)}::jsonb,
+          ${input.traceId}, ${now}, ${now}
+        )
+        RETURNING id
+      ),
+      timeline AS (
+        INSERT INTO notification_events (id, notification_id, kind, actor, data, created_at)
+        SELECT ${eventId}, id, 'accepted', ${input.actor ?? "api"},
+               ${JSON.stringify(eventData)}::jsonb, ${now}
+        FROM created
+      ),
+      queued AS (
+        INSERT INTO outbox (
+          id, aggregate_type, aggregate_id, shard, topic, partition_key, payload,
+          headers, status, attempts, available_at, created_at
+        )
+        SELECT ${outboxId}, 'notification', id, ${shard}, ${topicFor(priority)}, ${userId},
+               ${JSON.stringify(payload)}::jsonb, ${JSON.stringify(headers)}::jsonb,
+               'pending'::"outbox_status", 0, ${now}, ${now}
+        FROM created
+      )
+      SELECT id FROM created
+    `;
   } catch (error) {
-    const isUniqueViolation =
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      (error as { code: unknown }).code === "P2002";
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code: unknown }).code)
+        : "";
+    const driverCode =
+      typeof error === "object" && error !== null && "meta" in error
+        ? String(
+            (error as { meta?: { driverAdapterError?: { cause?: { originalCode?: unknown } } } })
+              .meta?.driverAdapterError?.cause?.originalCode ?? "",
+          )
+        : "";
 
-    if (!isUniqueViolation) {
+    if (code === "P2003" || driverCode === "23503") {
+      throw new AppError("unknown_recipient", "Recipient not found", 422, {
+        details: { external_id: input.event.recipient.external_id },
+      });
+    }
+
+    if (code !== "P2002" && driverCode !== "23505") {
       throw error;
     }
 

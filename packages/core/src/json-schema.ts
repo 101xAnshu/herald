@@ -1,7 +1,7 @@
 import Ajv, { type ErrorObject } from "ajv";
 
 const ajv = new Ajv({ allErrors: true, strict: false, allowUnionTypes: true });
-const compiled = new Map<string, ReturnType<typeof ajv.compile>>();
+const compiled = new WeakMap<object, ReturnType<typeof ajv.compile>>();
 
 export interface JsonSchemaResult {
   ok: boolean;
@@ -16,12 +16,11 @@ export const validateJsonSchema = (
     return { ok: true, errors: [] };
   }
 
-  const key = JSON.stringify(schema);
-  let validator = compiled.get(key);
+  let validator = compiled.get(schema);
 
   if (!validator) {
     validator = ajv.compile(schema);
-    compiled.set(key, validator);
+    compiled.set(schema, validator);
   }
 
   if (validator(value)) {

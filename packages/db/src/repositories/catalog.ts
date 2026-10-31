@@ -54,11 +54,25 @@ export const toEventTypeDefinition = (row: EventTypeRow): EventTypeDefinition =>
   };
 };
 
+const eventTypeCache = new Map<string, { definition: EventTypeDefinition; expiresAt: number }>();
+const EVENT_TYPE_CACHE_TTL_MS = 5_000;
+
+export const clearEventTypeCache = (): void => {
+  eventTypeCache.clear();
+};
+
 export const getEventType = async (
   db: Db,
   key: string,
   version?: number,
 ): Promise<EventTypeDefinition | null> => {
+  const cacheKey = `${key}:${version ?? "latest"}`;
+  const cached = eventTypeCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.definition;
+  }
+
   const row = version
     ? await db.eventType.findUnique({ where: { key_version: { key, version } } })
     : await db.eventType.findFirst({
@@ -70,7 +84,7 @@ export const getEventType = async (
     return null;
   }
 
-  return toEventTypeDefinition({
+  const definition = toEventTypeDefinition({
     key: row.key,
     version: row.version,
     schema: row.schema,
@@ -80,12 +94,20 @@ export const getEventType = async (
     dedupeWindowSeconds: row.dedupeWindowSeconds,
     policy: row.policy,
   });
+
+  eventTypeCache.set(cacheKey, {
+    definition,
+    expiresAt: Date.now() + EVENT_TYPE_CACHE_TTL_MS,
+  });
+
+  return definition;
 };
 
 export const listEventTypes = async (db: Db) =>
   db.eventType.findMany({ orderBy: [{ key: "asc" }, { version: "desc" }] });
 
 export const createEventType = async (db: Db, input: CreateEventType) => {
+  clearEventTypeCache();
   return db.eventType.create({
     data: {
       id: newId(),
@@ -102,6 +124,7 @@ export const createEventType = async (db: Db, input: CreateEventType) => {
 };
 
 export const updateEventType = async (db: Db, key: string, input: UpdateEventType) => {
+  clearEventTypeCache();
   const existing = await db.eventType.findFirst({
     where: { key },
     orderBy: { version: "desc" },
