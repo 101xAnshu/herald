@@ -69,4 +69,4 @@ drill-db:
 site:
 	python3 -m http.server 8080 --directory site
 
-verify: build lint test test-e2e
+verify: build lint typecheck test test-e2e
