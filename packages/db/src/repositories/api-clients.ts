@@ -91,9 +91,11 @@ export const authenticateApiKey = async (db: Db, raw: string) => {
     return null;
   }
 
-  void db.apiClient
-    .update({ where: { id: client.id }, data: { lastUsedAt: now } })
-    .catch(() => undefined);
+  if (!client.lastUsedAt || now.getTime() - client.lastUsedAt.getTime() > 60_000) {
+    void db.apiClient
+      .update({ where: { id: client.id }, data: { lastUsedAt: now } })
+      .catch(() => undefined);
+  }
 
   return {
     id: client.id,
