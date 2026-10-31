@@ -1,5 +1,6 @@
 import type { ChannelAdapter, ProviderStatusResolver } from "@herald/core";
 
+import { CircuitBreakerAdapter } from "./circuit";
 import { createSmtpAdapter } from "./email";
 import { MockAdapter } from "./mock";
 
@@ -10,10 +11,10 @@ export interface AdapterRegistry {
 
 export const createAdapterRegistry = (): AdapterRegistry => {
   const adapters: ChannelAdapter[] = [
-    createSmtpAdapter(),
-    new MockAdapter("in_app", "in_app"),
-    new MockAdapter("mock_push", "push"),
-    new MockAdapter("mock_sms", "sms"),
+    new CircuitBreakerAdapter(createSmtpAdapter()),
+    new CircuitBreakerAdapter(new MockAdapter("in_app", "in_app")),
+    new CircuitBreakerAdapter(new MockAdapter("mock_push", "push")),
+    new CircuitBreakerAdapter(new MockAdapter("mock_sms", "sms")),
   ];
 
   const byChannel = new Map(adapters.map((adapter) => [adapter.channel, adapter]));
@@ -44,5 +45,6 @@ export const createMockStatusResolver = (): ProviderStatusResolver => ({
   },
 });
 
+export { CircuitBreakerAdapter, type CircuitOptions } from "./circuit";
 export { MockAdapter } from "./mock";
 export { SmtpEmailAdapter, createSmtpAdapter } from "./email";
