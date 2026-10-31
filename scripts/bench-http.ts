@@ -122,21 +122,57 @@ const setupRequest = (request: Record<string, unknown>) => {
   return request;
 };
 
-const run = (duration: number, rate: number, connections: number): Promise<AutocannonResult> =>
-  autocannon({
-    url: `${options.url.replace(/\/$/, "")}/v1/events`,
-    method: "POST",
-    headers: { authorization: `Bearer ${options.key}` },
-    connections,
-    duration,
-    overallRate: rate,
-    pipelining: 1,
-    timeout: 15,
-    requests: [{ setupRequest }],
+interface RunOutput {
+  result: AutocannonResult;
+  samples: number[];
+}
+
+const run = (duration: number, rate: number, connections: number): Promise<RunOutput> =>
+  new Promise<RunOutput>((resolve, reject) => {
+    const samples: number[] = [];
+    const instance = autocannon(
+      {
+        url: `${options.url.replace(/\/$/, "")}/v1/events`,
+        method: "POST",
+        headers: { authorization: `Bearer ${options.key}` },
+        connections,
+        duration,
+        overallRate: rate,
+        pipelining: 1,
+        timeout: 15,
+        requests: [{ setupRequest }],
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve({ result, samples });
+      },
+    );
+
+    instance.on("response", (...args: unknown[]) => {
+      const responseTime = args[3];
+
+      if (typeof responseTime === "number") {
+        samples.push(responseTime);
+      }
+    });
   });
 
-const percentile = (result: AutocannonResult, key: keyof AutocannonResult["latency"]): number =>
-  Number(result.latency[key] ?? 0);
+const percentile = (samples: number[], p: number): number => {
+  if (samples.length === 0) {
+    return 0;
+  }
+
+  const sorted = [...samples].sort((left, right) => left - right);
+  const rank = Math.ceil((p / 100) * sorted.length) - 1;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, rank))] ?? 0;
+};
+
+const mean = (samples: number[]): number =>
+  samples.length === 0 ? 0 : samples.reduce((sum, value) => sum + value, 0) / samples.length;
 
 const reachedTarget = (achieved: number, target: number): boolean => achieved >= target * 0.9;
 
@@ -150,7 +186,7 @@ const main = async (): Promise<void> => {
   const cpuBefore = process.cpuUsage();
   const started = Date.now();
 
-  const result = await run(options.duration, options.rate, options.connections);
+  const { result, samples } = await run(options.duration, options.rate, options.connections);
 
   const elapsedSeconds = (Date.now() - started) / 1000;
   const cpuAfter = process.cpuUsage(cpuBefore);
@@ -190,17 +226,19 @@ measures the insert path rather than the duplicate fast path.
 | Field | Value |
 |---|---|
 | Requests sent | ${requestsSent} |
+| Latency samples | ${samples.length} |
 | Accepted (2xx) | ${accepted} |
 | Rejected (4xx) | ${result["4xx"]} |
 | Server errors (5xx) | ${result["5xx"]} |
 | Connection errors | ${result.errors} |
 | Timeouts | ${result.timeouts} |
 | Throughput | ${result.requests.average.toFixed(1)} requests/s |
-| p50 latency | ${percentile(result, "p50").toFixed(1)} ms |
-| p90 latency | ${percentile(result, "p90").toFixed(1)} ms |
-| p97.5 latency | ${percentile(result, "p97_5").toFixed(1)} ms |
-| p99 latency | ${percentile(result, "p99").toFixed(1)} ms |
-| Max latency | ${percentile(result, "max").toFixed(1)} ms |
+| Mean latency | ${mean(samples).toFixed(1)} ms |
+| p50 latency | ${percentile(samples, 50).toFixed(1)} ms |
+| p90 latency | ${percentile(samples, 90).toFixed(1)} ms |
+| p95 latency | ${percentile(samples, 95).toFixed(1)} ms |
+| p99 latency | ${percentile(samples, 99).toFixed(1)} ms |
+| Max latency | ${(samples.length > 0 ? Math.max(...samples) : 0).toFixed(1)} ms |
 | Client CPU | ${clientCpuPercent.toFixed(1)}% of one core |
 
 ## Pipeline state
@@ -240,10 +278,10 @@ ${reachedTarget(result.requests.average, options.rate) ? "" : "The API did not r
           rejected: result["4xx"],
           server_errors: result["5xx"],
           errors: result.errors,
-          p50_ms: percentile(result, "p50"),
-          p90_ms: percentile(result, "p90"),
-          p97_5_ms: percentile(result, "p97_5"),
-          p99_ms: percentile(result, "p99"),
+          p50_ms: percentile(samples, 50),
+          p90_ms: percentile(samples, 90),
+          p95_ms: percentile(samples, 95),
+          p99_ms: percentile(samples, 99),
           throughput: result.requests.average,
           client_cpu_percent: clientCpuPercent,
           passed,
