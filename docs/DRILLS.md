@@ -102,7 +102,7 @@ RTO here is promotion time plus application startup. It excludes load balancer c
 docker compose -f compose.yml -f compose.dr.yml down -v
 ```
 
-This removes the standby volume. The default Postgres volume is not removed by the combined file unless it is listed in both files; check `docker compose down` separately if you want to keep the primary data.
+This removes the standby volume and the volumes declared in the default stack, because Compose merges the two files into one project. Run `docker compose down` without `-v` if you want to keep the data.
 
 ## What would change in production
 
