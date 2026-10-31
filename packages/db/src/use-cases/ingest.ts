@@ -34,6 +34,14 @@ const SOURCE_CONTROL_TTL_MS = 1_000;
 const backlogCache = new Map<number, { pending: number; oldestAgeSeconds: number; expiresAt: number }>();
 const BACKLOG_CACHE_TTL_MS = 500;
 
+export const clearSourceControlCache = (): void => {
+  sourceControlCache.clear();
+};
+
+export const clearBacklogCache = (): void => {
+  backlogCache.clear();
+};
+
 const isSourcePaused = async (db: ReturnType<typeof getPrismaForUser>, source: Source) => {
   const cached = sourceControlCache.get(source);
 

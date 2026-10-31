@@ -1,6 +1,6 @@
 import type { EventEnvelope } from "@herald/contracts";
 import { EventEnvelopeSchema } from "@herald/contracts";
-import { dedupeKey } from "@herald/core";
+import { AppError, dedupeKey } from "@herald/core";
 import { orchestrateNotification } from "@herald/db";
 import { KafkaConsumer, consumerGroup, eventsTopic } from "@herald/queue";
 import {
@@ -64,6 +64,14 @@ export const createOrchestratorConsumers = (priorities: Priority[]): KafkaConsum
             "orchestrated notification",
           );
         } catch (error) {
+          if (error instanceof AppError && error.code === "not_found") {
+            logger.warn(
+              { trace_id: event.trace_id, notification_id: event.notification_id },
+              "event references a missing notification, acknowledging",
+            );
+            return;
+          }
+
           logger.error(
             {
               err: error,

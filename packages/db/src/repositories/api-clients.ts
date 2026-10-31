@@ -21,6 +21,10 @@ interface CachedApiClient {
 const apiKeyCache = new Map<string, { client: CachedApiClient; expiresAt: number }>();
 const API_KEY_CACHE_TTL_MS = 5_000;
 
+export const clearApiKeyCache = (): void => {
+  apiKeyCache.clear();
+};
+
 export interface IssuedApiKey {
   id: string;
   key: string;

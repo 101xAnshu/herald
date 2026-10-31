@@ -32,6 +32,7 @@ export {
 
 export {
   authenticateApiKey,
+  clearApiKeyCache,
   issueApiKey,
   revokeApiKey,
   rotateApiKey,
@@ -48,6 +49,7 @@ export {
   listTemplates,
   publishTemplateVersion,
   updateEventType,
+  clearEventTypeCache,
 } from "./repositories/catalog";
 export {
   cancelNotification,
@@ -93,7 +95,13 @@ export {
   type CampaignRunResult,
 } from "./use-cases/campaigns";
 export { processDelivery, type DeliveryOutcome } from "./use-cases/delivery";
-export { ingestEvent, type IngestInput, type IngestResult } from "./use-cases/ingest";
+export {
+  clearBacklogCache,
+  clearSourceControlCache,
+  ingestEvent,
+  type IngestInput,
+  type IngestResult,
+} from "./use-cases/ingest";
 export {
   orchestrateNotification,
   type OrchestrateOptions,

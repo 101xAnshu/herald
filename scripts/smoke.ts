@@ -75,6 +75,20 @@ const main = async (): Promise<void> => {
     throw new Error("idempotency returned two notification IDs");
   }
 
+  const missing = await fetch(`${baseUrl}/v1/events`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${bookingKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      ...event,
+      recipient: { external_id: "missing_recipient" },
+      idempotency_key: `${idempotencyKey}:missing`,
+    }),
+  });
+
+  if (missing.status !== 422) {
+    throw new Error(`unknown recipient returned ${missing.status}, expected 422`);
+  }
+
   let trace: {
     data: {
       notification: { status: string };

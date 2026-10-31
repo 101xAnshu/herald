@@ -3,6 +3,7 @@ import { AppError, newId } from "@herald/core";
 import { loadConfig } from "@herald/config";
 import type { Prisma } from "../generated/prisma/client";
 import { getPrisma } from "../prisma";
+import { clearSourceControlCache } from "./ingest";
 import {
   channelToDb,
   sourceToDb,
@@ -248,6 +249,8 @@ export const setSourcePaused = async (
 ) => {
   const db = getPrisma(0);
   const sourceValue = sourceToDb(source);
+
+  clearSourceControlCache();
 
   return db.$transaction(async (tx) => {
     const control = await tx.sourceControl.upsert({

@@ -6,7 +6,7 @@ import { createAdapterRegistry } from "@herald/providers";
 import { createPublisher, ensureTopics, type KafkaConsumer } from "@herald/queue";
 
 import { startMetricsServer } from "./metrics-server";
-import { disconnectRedis } from "./redis";
+import { disconnectRedis, startCacheInvalidation } from "./redis";
 import { runCampaignLoop } from "./roles/campaign";
 import { createDeliveryConsumers } from "./roles/delivery";
 import { createOrchestratorConsumers } from "./roles/orchestrator";
@@ -33,6 +33,7 @@ export const startWorker = async (): Promise<void> => {
     logger.warn({ err: error }, "could not ensure Kafka topics");
   });
 
+  await startCacheInvalidation();
   logger.info({ roles: config.workerRoles }, "worker starting");
 
   if (config.workerRoles.includes("relay")) {

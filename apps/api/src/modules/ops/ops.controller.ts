@@ -1,6 +1,7 @@
 import type { FaultInjection, Source } from "@herald/contracts";
 import type { Request, Response } from "express";
 
+import { publishInvalidation } from "../../core/cache-events";
 import { sendSuccess } from "../../core/http/response";
 import * as service from "./ops.service";
 
@@ -49,12 +50,14 @@ export const discardController = async (req: Request, res: Response): Promise<vo
 export const pauseSourceController = async (req: Request, res: Response): Promise<void> => {
   const body = req.validated?.body as { reason: string };
   const control = await service.pauseSource(params(req)["name"] as Source, body.reason, actor(req));
+  await publishInvalidation("source");
   sendSuccess(res, { source: control.source.toLowerCase(), paused: control.paused, reason: control.reason });
 };
 
 export const resumeSourceController = async (req: Request, res: Response): Promise<void> => {
   const body = req.validated?.body as { reason: string };
   const control = await service.resumeSource(params(req)["name"] as Source, body.reason, actor(req));
+  await publishInvalidation("source");
   sendSuccess(res, { source: control.source.toLowerCase(), paused: control.paused, reason: control.reason });
 };
 

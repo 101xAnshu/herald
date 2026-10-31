@@ -6,6 +6,7 @@ import { logger, setBuildInfo } from "@herald/observability";
 import { ensureTopics } from "@herald/queue";
 
 import { createApp } from "./app";
+import { startCacheInvalidation } from "./core/cache-events";
 import { disconnectRedis } from "./core/middleware/rate-limit.middleware";
 
 export const startServer = async (): Promise<Server> => {
@@ -15,6 +16,8 @@ export const startServer = async (): Promise<Server> => {
   await ensureTopics(config.kafkaPartitions).catch((error: unknown) => {
     logger.warn({ err: error }, "could not ensure Kafka topics at startup");
   });
+
+  await startCacheInvalidation();
 
   const app = createApp();
   const server = app.listen(config.port, () => {
