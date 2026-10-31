@@ -7,10 +7,10 @@ services:
         rm -rf /var/lib/postgresql/data/*
         chown -R postgres:postgres /var/lib/postgresql/data
         chmod 700 /var/lib/postgresql/data
-        until gosu postgres env PGPASSWORD=replicator pg_basebackup -h postgres -D /var/lib/postgresql/data -U replicator -Fp -Xs -P -R; do
+        until gosu postgres env PGPASSWORD=replicator pg_basebackup -h postgres -D /var/lib/postgresql/data -U replicator -Fp -Xs -P -R --checkpoint=fast; do
           sleep 2
         done
-        exec gosu postgres postgres -D /var/lib/postgresql/data -c hot_standby=on
+        exec gosu postgres postgres -D /var/lib/postgresql/data -c hot_standby=on -c max_connections=200
     ports:
       - "5435:5432"
     volumes:
