@@ -306,37 +306,36 @@ export const orchestrateNotification = async (
       },
     });
 
-    for (const item of deliveryTopics) {
-      const deliveryId = newId();
+    const deliveries = deliveryTopics.map((item) => ({
+      id: newId(),
+      notificationId: notification.id,
+      userId: notification.userId,
+      channel: channelToDb(item.channel),
+      priority: priorityToDb(priority),
+      provider: item.provider,
+      templateVersionId: item.templateVersionId,
+    }));
 
-      await tx.delivery.create({
-        data: {
-          id: deliveryId,
-          notificationId: notification.id,
-          userId: notification.userId,
-          channel: channelToDb(item.channel),
-          priority: priorityToDb(priority),
-          provider: item.provider,
-          templateVersionId: item.templateVersionId,
-        },
-      });
+    await tx.delivery.createMany({ data: deliveries });
 
-      const message: DeliveryMessage = {
-        delivery_id: deliveryId,
-        notification_id: notification.id,
-        user_id: notification.userId,
-        channel: item.channel,
-        priority,
-        source: sourceFromDb(notification.source),
-        trace_id: notification.traceId,
-        shard: event.shard,
-      };
+    await tx.outbox.createMany({
+      data: deliveries.map((delivery, index) => {
+        const item = deliveryTopics[index]!;
+        const message: DeliveryMessage = {
+          delivery_id: delivery.id,
+          notification_id: notification.id,
+          user_id: notification.userId,
+          channel: item.channel,
+          priority,
+          source: sourceFromDb(notification.source),
+          trace_id: notification.traceId,
+          shard: event.shard,
+        };
 
-      await tx.outbox.create({
-        data: {
+        return {
           id: newId(),
           aggregateType: "delivery",
-          aggregateId: deliveryId,
+          aggregateId: delivery.id,
           shard: event.shard,
           topic: item.topic,
           partitionKey: notification.userId,
@@ -344,15 +343,15 @@ export const orchestrateNotification = async (
           headers: {
             trace_id: notification.traceId,
             notification_id: notification.id,
-            delivery_id: deliveryId,
+            delivery_id: delivery.id,
             priority,
             source: sourceFromDb(notification.source),
             schema_version: notification.eventVersion,
             shard: event.shard,
           },
-        },
-      });
-    }
+        };
+      }),
+    });
 
     await tx.notificationEvent.create({
       data: {
@@ -368,7 +367,9 @@ export const orchestrateNotification = async (
       },
     });
 
-    await syncRecipientStatus(tx, notification.id, "processing");
+    if (notification.eventType === "campaign.message") {
+      await syncRecipientStatus(tx, notification.id, "processing");
+    }
   });
 
   return {

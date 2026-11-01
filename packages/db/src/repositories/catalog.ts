@@ -179,7 +179,7 @@ export const listTemplates = async (db: Db) =>
     orderBy: [{ key: "asc" }, { channel: "asc" }, { locale: "asc" }],
   });
 
-export const findTemplateForRecipient = async (
+const queryTemplates = async (
   db: Db,
   key: string,
   channel: Channel,
@@ -195,6 +195,35 @@ export const findTemplateForRecipient = async (
     },
     include: { currentVersion: true },
   });
+
+type TemplateRows = Awaited<ReturnType<typeof queryTemplates>>;
+
+const templateCache = new Map<string, { rows: TemplateRows; expiresAt: number }>();
+const TEMPLATE_CACHE_TTL_MS = 5_000;
+
+export const clearTemplateCache = (): void => {
+  templateCache.clear();
+};
+
+export const findTemplateForRecipient = async (
+  db: Db,
+  key: string,
+  channel: Channel,
+  locales: readonly string[],
+): Promise<TemplateRows> => {
+  const cacheKey = `${key}:${channel}:${locales.join(",")}`;
+  const cached = templateCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.rows;
+  }
+
+  const rows = await queryTemplates(db, key, channel, locales);
+
+  templateCache.set(cacheKey, { rows, expiresAt: Date.now() + TEMPLATE_CACHE_TTL_MS });
+
+  return rows;
+};
 
 export const createTemplate = async (db: Db, input: CreateTemplate) =>
   db.template.create({

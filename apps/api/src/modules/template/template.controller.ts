@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 
 import { AppError } from "@herald/core";
 
+import { publishInvalidation } from "../../core/cache-events";
 import { sendSuccess } from "../../core/http/response";
 import * as service from "./template.service";
 
@@ -22,12 +23,16 @@ export const createTemplateController = async (req: Request, res: Response): Pro
 
 export const createVersionController = async (req: Request, res: Response): Promise<void> => {
   const body = req.validated?.body as Parameters<typeof service.addTemplateVersion>[1];
-  sendSuccess(res, await service.addTemplateVersion(params(req).id, body, req.apiClient!.name), 201);
+  const result = await service.addTemplateVersion(params(req).id, body, req.apiClient!.name);
+  await publishInvalidation("template");
+  sendSuccess(res, result, 201);
 };
 
 export const publishController = async (req: Request, res: Response): Promise<void> => {
   const body = req.validated?.body as { version_id: string };
-  sendSuccess(res, await service.publishVersion(params(req).id, body.version_id));
+  const result = await service.publishVersion(params(req).id, body.version_id);
+  await publishInvalidation("template");
+  sendSuccess(res, result);
 };
 
 export const previewController = async (req: Request, res: Response): Promise<void> => {

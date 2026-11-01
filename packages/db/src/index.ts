@@ -50,6 +50,7 @@ export {
   publishTemplateVersion,
   updateEventType,
   clearEventTypeCache,
+  clearTemplateCache,
 } from "./repositories/catalog";
 export {
   cancelNotification,

@@ -1,5 +1,5 @@
 import { RedisStore } from "@herald/cache";
-import { clearEventTypeCache, clearSourceControlCache } from "@herald/db";
+import { clearEventTypeCache, clearSourceControlCache, clearTemplateCache } from "@herald/db";
 import { logger } from "@herald/observability";
 
 let store: RedisStore | undefined;
@@ -20,6 +20,10 @@ export const startCacheInvalidation = async (): Promise<void> => {
 
       if (type === "source" || type === "all") {
         clearSourceControlCache();
+      }
+
+      if (type === "template" || type === "all") {
+        clearTemplateCache();
       }
     });
   } catch (error) {

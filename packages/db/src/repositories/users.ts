@@ -1,5 +1,6 @@
 import type { Channel, PreferenceEntry, Source, Unsubscribe } from "@herald/contracts";
 import { AppError, hashAddress, newId, type PolicyUser } from "@herald/core";
+import { loadSuppressionIndex } from "./suppressions";
 import type { Db } from "../prisma";
 import {
   channelFromDb,
@@ -40,18 +41,14 @@ export const loadPolicyUser = async (
     ...user.devices.map((device) => device.tokenHash),
   ].filter((value): value is string => Boolean(value));
 
-  const suppressions =
-    hashes.length > 0
-      ? await db.suppressionList.findMany({
-          where: {
-            addressHash: { in: hashes },
-            OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-          },
-          select: { channel: true },
-        })
-      : [];
-
-  const suppressedChannels = [...new Set(suppressions.map((row) => channelFromDb(row.channel)))];
+  const suppressionIndex = hashes.length > 0 ? await loadSuppressionIndex(db) : new Map();
+  const suppressedChannels = [
+    ...new Set(
+      hashes
+        .map((hash) => suppressionIndex.get(hash)?.channel)
+        .filter((channel): channel is Channel => Boolean(channel)),
+    ),
+  ];
 
   return {
     id: user.id,

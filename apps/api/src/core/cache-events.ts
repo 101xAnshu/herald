@@ -3,13 +3,14 @@ import {
   clearBacklogCache,
   clearEventTypeCache,
   clearSourceControlCache,
+  clearTemplateCache,
 } from "@herald/db";
 import { logger } from "@herald/observability";
 
 import { redis } from "./middleware/rate-limit.middleware";
 
 const CACHE_CHANNEL = "herald:cache";
-type Invalidation = "api_key" | "event_type" | "source" | "all";
+type Invalidation = "api_key" | "event_type" | "source" | "template" | "all";
 
 const clearLocal = (type: Invalidation): void => {
   if (type === "api_key" || type === "all") {
@@ -22,6 +23,10 @@ const clearLocal = (type: Invalidation): void => {
 
   if (type === "source" || type === "all") {
     clearSourceControlCache();
+  }
+
+  if (type === "template" || type === "all") {
+    clearTemplateCache();
   }
 
   if (type === "all") {
@@ -44,8 +49,14 @@ export const startCacheInvalidation = async (): Promise<void> => {
     await redis().subscribe(CACHE_CHANNEL, (payload) => {
       const type = (payload as { type?: unknown }).type;
 
-      if (type === "api_key" || type === "event_type" || type === "source" || type === "all") {
-        clearLocal(type);
+      if (
+        type === "api_key" ||
+        type === "event_type" ||
+        type === "source" ||
+        type === "template" ||
+        type === "all"
+      ) {
+        clearLocal(type as Invalidation);
       }
     });
   } catch (error) {

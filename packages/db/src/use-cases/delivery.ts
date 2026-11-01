@@ -7,7 +7,6 @@ import type {
   Source,
 } from "@herald/contracts";
 import {
-  aggregateNotificationStatus,
   AppError,
   canRetry,
   classifyProviderError,
@@ -32,7 +31,22 @@ import {
   sourceFromDb,
   sourceToDb,
 } from "../mappers";
+import { loadSuppressionIndex } from "../repositories/suppressions";
 import { syncRecipientStatus } from "./campaigns";
+
+export interface InboxEvent {
+  id: string;
+  notificationId: string;
+  source: Source;
+  title: string;
+  body: string;
+  deepLink: string | null;
+  readAt: Date | null;
+  createdAt: Date;
+  expiresAt: Date | null;
+  sequence: bigint;
+  metadata: unknown;
+}
 
 export interface DeliveryOutcome {
   deliveryId: string;
@@ -40,9 +54,33 @@ export interface DeliveryOutcome {
   notificationStatus: NotificationStatus;
   retryAt: Date | null;
   inboxItemId: string | null;
+  inbox: InboxEvent | null;
 }
 
 const terminal = new Set(["ACCEPTED", "DELIVERED", "FAILED", "CANCELED", "SUPPRESSED"]);
+
+const FAULT_CACHE_MS = 1_000;
+const faultCache = new Map<string, { outcome: string | null; expiresAt: number }>();
+
+const activeFaultOutcome = async (db: Db, channel: Channel): Promise<string | null> => {
+  const cached = faultCache.get(channel);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.outcome;
+  }
+
+  const fault = await db.providerFault.findFirst({
+    where: { channel: channelToDb(channel), expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  faultCache.set(channel, {
+    outcome: fault?.outcome ?? null,
+    expiresAt: Date.now() + FAULT_CACHE_MS,
+  });
+
+  return fault?.outcome ?? null;
+};
 
 const addressHashesFor = (
   channel: Channel,
@@ -91,6 +129,7 @@ export const processDelivery = async (
       notificationStatus: notificationStatusFromDb(delivery.notification.status),
       retryAt: null,
       inboxItemId: null,
+      inbox: null,
     };
   }
 
@@ -120,34 +159,36 @@ export const processDelivery = async (
         : notificationStatusFromDb(delivery.notification.status),
       retryAt: null,
       inboxItemId: null,
+      inbox: null,
     };
   }
 
+  const context = {
+    deliveryId: delivery.id,
+    notificationId: delivery.notificationId,
+    isCampaign: delivery.notification.eventType === "campaign.message",
+    currentNotificationStatus: delivery.notification.status,
+  };
   const attempt = delivery.attemptCount + 1;
   const channel = channelFromDb(delivery.channel);
   const priority = priorityFromDb(delivery.priority);
   const data = (delivery.notification.payload ?? {}) as Record<string, unknown>;
   const pushTokenHashes = delivery.user.devices.map((device) => device.tokenHash);
 
-  const suppressed = await db.suppressionList.findFirst({
-    where: {
-      channel: delivery.channel,
-      addressHash: {
-        in: addressHashesFor(
-          channel,
-          { email: delivery.user.email, phone: delivery.user.phone },
-          pushTokenHashes,
-          config.apiKeyPepper,
-        ),
-      },
-      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-    },
-  });
+  const suppressionIndex = await loadSuppressionIndex(db);
+  const suppressed = addressHashesFor(
+    channel,
+    { email: delivery.user.email, phone: delivery.user.phone },
+    pushTokenHashes,
+    config.apiKeyPepper,
+  )
+    .map((hash) => suppressionIndex.get(hash))
+    .find((entry) => entry?.channel === channel);
 
   const now = new Date();
 
   if (suppressed) {
-    return finalize(db, delivery.id, {
+    return finalize(db, context, {
       status: "SUPPRESSED",
       attempt,
       channel,
@@ -161,7 +202,7 @@ export const processDelivery = async (
   }
 
   if (!delivery.templateVersion) {
-    return finalize(db, delivery.id, {
+    return finalize(db, context, {
       status: "FAILED",
       attempt,
       channel,
@@ -189,7 +230,7 @@ export const processDelivery = async (
   );
 
   if (!rendered.ok) {
-    return finalize(db, delivery.id, {
+    return finalize(db, context, {
       status: "FAILED",
       attempt,
       channel,
@@ -205,11 +246,7 @@ export const processDelivery = async (
     });
   }
 
-  const fault = await db.providerFault.findFirst({
-    where: { channel: delivery.channel, expiresAt: { gt: new Date() } },
-    orderBy: { createdAt: "desc" },
-  });
-  const mockOutcome = fault?.outcome ?? data.mock_outcome;
+  const mockOutcome = (await activeFaultOutcome(db, channel)) ?? data.mock_outcome;
   const outbound: OutboundMessage = {
     deliveryId: delivery.id,
     notificationId: delivery.notificationId,
@@ -264,7 +301,7 @@ export const processDelivery = async (
     const delivered = channel === "in_app";
     const status = delivered ? "DELIVERED" : "ACCEPTED";
 
-    return finalize(db, delivery.id, {
+    return finalize(db, context, {
       status,
       attempt,
       channel,
@@ -292,7 +329,7 @@ export const processDelivery = async (
   const failureClass = errorClass ?? "transient";
 
   if (failureClass === "unknown") {
-    return finalize(db, delivery.id, {
+    return finalize(db, context, {
       status: "UNKNOWN",
       attempt,
       channel,
@@ -306,7 +343,7 @@ export const processDelivery = async (
   }
 
   if (failureClass === "suppressed") {
-    return finalize(db, delivery.id, {
+    return finalize(db, context, {
       status: "SUPPRESSED",
       attempt,
       channel,
@@ -325,7 +362,7 @@ export const processDelivery = async (
     const delay = retryDelayMs(attempt);
     const retryAt = new Date(now.getTime() + delay);
 
-    return finalize(db, delivery.id, {
+    return finalize(db, context, {
       status: "RETRY_SCHEDULED",
       attempt,
       channel,
@@ -339,7 +376,7 @@ export const processDelivery = async (
     });
   }
 
-  return finalize(db, delivery.id, {
+  return finalize(db, context, {
     status: "FAILED",
     attempt,
     channel,
@@ -356,6 +393,13 @@ export const processDelivery = async (
     },
   });
 };
+
+interface FinalizeContext {
+  deliveryId: string;
+  notificationId: string;
+  isCampaign: boolean;
+  currentNotificationStatus: Parameters<typeof notificationStatusFromDb>[0];
+}
 
 interface FinalizeInput {
   status: "ACCEPTED" | "DELIVERED" | "RETRY_SCHEDULED" | "UNKNOWN" | "FAILED" | "SUPPRESSED";
@@ -388,23 +432,16 @@ interface FinalizeInput {
 
 const finalize = async (
   db: Db,
-  deliveryId: string,
+  context: FinalizeContext,
   input: FinalizeInput,
 ): Promise<DeliveryOutcome> => {
   const now = new Date();
-  const delivery = await db.delivery.findUnique({
-    where: { id: deliveryId },
-    select: { notificationId: true, userId: true },
-  });
-
-  if (!delivery) {
-    throw new AppError("not_found", "Delivery not found", 404);
-  }
-
+  const { deliveryId, notificationId } = context;
   const inboxId = input.inbox ? newId() : null;
   const config = loadConfig();
+  const mayHaveSchedule = input.attempt > 1;
 
-  const notificationStatus = await db.$transaction(async (tx) => {
+  const result = await db.$transaction(async (tx) => {
     const update = await tx.delivery.updateMany({
       where: { id: deliveryId, status: "SENDING" },
       data: {
@@ -420,8 +457,8 @@ const finalize = async (
     });
 
     if (update.count === 0) {
-      const latest = await tx.notification.findUnique({ where: { id: delivery.notificationId } });
-      return latest?.status ?? "FAILED";
+      const latest = await tx.notification.findUnique({ where: { id: notificationId } });
+      return { notificationStatus: latest?.status ?? ("FAILED" as const), inboxItem: null };
     }
 
     await tx.deliveryAttempt.create({
@@ -452,24 +489,24 @@ const finalize = async (
         },
         update: { dueAt: input.retryAt, attempt: input.attempt + 1, state: "PENDING" },
       });
-    }
+    } else if (mayHaveSchedule) {
+      const state =
+        input.status === "ACCEPTED" || input.status === "DELIVERED"
+          ? "SUCCEEDED"
+          : input.status === "FAILED"
+            ? "EXHAUSTED"
+            : "CANCELED";
 
-    if (input.status === "ACCEPTED" || input.status === "DELIVERED") {
       await tx.retrySchedule.updateMany({
-        where: { deliveryId },
-        data: { state: "SUCCEEDED" },
+        where: { deliveryId, state: { in: ["PENDING", "CLAIMED"] } },
+        data: { state },
       });
     }
 
-    if (input.status === "FAILED") {
-      await tx.retrySchedule.updateMany({
-        where: { deliveryId },
-        data: { state: "EXHAUSTED" },
-      });
-    }
+    let inboxItem: InboxEvent | null = null;
 
     if (input.inbox && inboxId) {
-      await tx.inboxItem.create({
+      const created = await tx.inboxItem.create({
         data: {
           id: inboxId,
           userId: input.inbox.userId,
@@ -483,6 +520,20 @@ const finalize = async (
           expiresAt: new Date(now.getTime() + config.inboxRetentionDays * 86_400_000),
         },
       });
+
+      inboxItem = {
+        id: created.id,
+        notificationId: created.notificationId,
+        source: input.inbox.source,
+        title: created.title,
+        body: created.body,
+        deepLink: created.deepLink,
+        readAt: created.readAt,
+        createdAt: created.createdAt,
+        expiresAt: created.expiresAt,
+        sequence: created.sequence,
+        metadata: created.metadata,
+      };
     }
 
     if (input.deadLetter) {
@@ -491,7 +542,7 @@ const finalize = async (
           id: newId(),
           topic: `herald.deliveries.${input.deadLetter.priority}.v1`,
           deliveryId,
-          notificationId: delivery.notificationId,
+          notificationId,
           payload: input.deadLetter.message as unknown as Prisma.InputJsonValue,
           headers: { trace_id: input.deadLetter.traceId },
           attempts: input.attempt,
@@ -501,25 +552,39 @@ const finalize = async (
       });
     }
 
-    const statuses = await tx.delivery.findMany({
-      where: { notificationId: delivery.notificationId },
-      select: { status: true },
-    });
+    const updated = await tx.$queryRaw<Array<{ status: Parameters<typeof notificationStatusFromDb>[0] }>>`
+      WITH agg AS (
+        SELECT
+          count(*) AS total,
+          CASE
+            WHEN bool_or(d.status NOT IN ('accepted', 'delivered', 'failed', 'canceled', 'suppressed'))
+              THEN CASE
+                WHEN bool_or(d.status IN ('accepted', 'delivered')) THEN 'partially_delivered'::notification_status
+                ELSE 'processing'::notification_status
+              END
+            WHEN bool_or(d.status IN ('accepted', 'delivered')) THEN 'delivered'::notification_status
+            WHEN bool_and(d.status = 'suppressed') THEN 'suppressed'::notification_status
+            ELSE 'failed'::notification_status
+          END AS status
+        FROM deliveries d
+        WHERE d.notification_id = ${notificationId}
+      )
+      UPDATE notifications n
+      SET status = agg.status, updated_at = now()
+      FROM agg
+      WHERE n.id = ${notificationId}
+        AND agg.total > 0
+        AND n.status <> agg.status
+      RETURNING n.status
+    `;
 
-    const aggregate = aggregateNotificationStatus(
-      "processing",
-      statuses.map((row) => deliveryStatusFromDb(row.status)),
-    );
-
-    await tx.notification.update({
-      where: { id: delivery.notificationId },
-      data: { status: notificationStatusToDb(aggregate) },
-    });
+    const aggregateDb = updated[0]?.status ?? context.currentNotificationStatus;
+    const aggregate = notificationStatusFromDb(aggregateDb);
 
     await tx.notificationEvent.create({
       data: {
         id: newId(),
-        notificationId: delivery.notificationId,
+        notificationId,
         kind: `delivery_${input.status.toLowerCase()}`,
         actor: "worker",
         data: {
@@ -533,16 +598,19 @@ const finalize = async (
       },
     });
 
-    await syncRecipientStatus(tx, delivery.notificationId, aggregate);
+    if (context.isCampaign) {
+      await syncRecipientStatus(tx, notificationId, aggregate);
+    }
 
-    return notificationStatusToDb(aggregate);
+    return { notificationStatus: notificationStatusToDb(aggregate), inboxItem };
   });
 
   return {
     deliveryId,
     status: input.status.toLowerCase() as DeliveryStatus,
-    notificationStatus: notificationStatusFromDb(notificationStatus),
+    notificationStatus: notificationStatusFromDb(result.notificationStatus),
     retryAt: input.retryAt ?? null,
-    inboxItemId: inboxId,
+    inboxItemId: result.inboxItem?.id ?? null,
+    inbox: result.inboxItem,
   };
 };
