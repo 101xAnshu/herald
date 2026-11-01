@@ -17,21 +17,41 @@ export interface SchedulerResult {
 
 const recoverStaleDeliveries = async (shard: number, batchSize: number): Promise<number> => {
   const db = getPrisma(shard);
-  const stale = await db.delivery.findMany({
-    where: {
-      status: { in: ["PENDING", "SENDING", "RETRY_SCHEDULED"] },
-      updatedAt: { lte: new Date(Date.now() - 30_000) },
-    },
-    include: { notification: true },
-    take: batchSize,
-  });
+  const stale = await db.$queryRaw<Array<{ id: string }>>`
+    SELECT d.id
+    FROM deliveries d
+    WHERE
+      (d.status = 'sending' AND d.updated_at <= now() - interval '30 seconds')
+      OR (
+        d.status = 'pending'
+        AND d.created_at <= now() - interval '60 seconds'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM outbox o
+          WHERE o.aggregate_type = 'delivery'
+            AND o.aggregate_id = d.id
+            AND o.published_at IS NOT NULL
+        )
+      )
+    ORDER BY d.updated_at ASC
+    LIMIT ${batchSize}
+  `;
 
   let recovered = 0;
 
-  for (const delivery of stale) {
+  for (const row of stale) {
+    const delivery = await db.delivery.findUnique({
+      where: { id: row.id },
+      include: { notification: true },
+    });
+
+    if (!delivery) {
+      continue;
+    }
+
     await db.$transaction(async (tx) => {
       const claimed = await tx.delivery.updateMany({
-        where: { id: delivery.id, status: { in: ["PENDING", "SENDING", "RETRY_SCHEDULED"] } },
+        where: { id: delivery.id, status: { in: ["PENDING", "SENDING"] } },
         data: { status: "RETRY_SCHEDULED", nextAttemptAt: new Date() },
       });
 
@@ -64,12 +84,7 @@ const recoverStaleDeliveries = async (shard: number, batchSize: number): Promise
           actor: "scheduler",
           data: {
             delivery_id: delivery.id,
-            reason:
-              delivery.status === "SENDING"
-                ? "stale_sending"
-                : delivery.status === "RETRY_SCHEDULED"
-                  ? "missing_retry_message"
-                  : "missing_delivery_message",
+            reason: delivery.status === "SENDING" ? "stale_sending" : "missing_delivery_message",
           },
         },
       });
@@ -83,19 +98,32 @@ const recoverStaleDeliveries = async (shard: number, batchSize: number): Promise
 
 const recoverUnprocessedNotifications = async (shard: number, batchSize: number): Promise<number> => {
   const db = getPrisma(shard);
-  const notifications = await db.notification.findMany({
-    where: {
-      status: "ACCEPTED",
-      fanoutPlan: { is: null },
-      createdAt: { lte: new Date(Date.now() - 30_000) },
-    },
-    orderBy: { createdAt: "asc" },
-    take: batchSize,
-  });
+  const stale = await db.$queryRaw<Array<{ id: string }>>`
+    SELECT n.id
+    FROM notifications n
+    WHERE n.status = 'accepted'
+      AND NOT EXISTS (SELECT 1 FROM fanout_plans f WHERE f.notification_id = n.id)
+      AND n.created_at <= now() - interval '60 seconds'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM outbox o
+        WHERE o.aggregate_type = 'notification'
+          AND o.aggregate_id = n.id
+          AND o.published_at IS NOT NULL
+      )
+    ORDER BY n.created_at ASC
+    LIMIT ${batchSize}
+  `;
 
   let recovered = 0;
 
-  for (const notification of notifications) {
+  for (const row of stale) {
+    const notification = await db.notification.findUnique({ where: { id: row.id } });
+
+    if (!notification) {
+      continue;
+    }
+
     await db.$transaction(async (tx) => {
       const priority = priorityFromDb(notification.priority);
       const payload: EventEnvelope = {
@@ -318,7 +346,10 @@ const startCampaigns = async (shard: number): Promise<number> => {
   return result.count;
 };
 
-export const runSchedulerJobs = async (batchSize = 100): Promise<SchedulerResult> => {
+export const runSchedulerJobs = async (
+  batchSize = 100,
+  options: { recover?: boolean } = {},
+): Promise<SchedulerResult> => {
   const config = loadConfig();
   let retries = 0;
   let notifications = 0;
@@ -335,8 +366,11 @@ export const runSchedulerJobs = async (batchSize = 100): Promise<SchedulerResult
     }
 
     try {
-      await recoverStaleDeliveries(shard, batchSize);
-      await recoverUnprocessedNotifications(shard, batchSize);
+      if (options.recover ?? true) {
+        await recoverStaleDeliveries(shard, batchSize);
+        await recoverUnprocessedNotifications(shard, batchSize);
+      }
+
       retries += await promoteRetries(shard, batchSize);
       notifications += await promoteNotifications(shard, batchSize);
       campaigns += await startCampaigns(shard);

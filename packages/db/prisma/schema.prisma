@@ -557,6 +557,7 @@ model Outbox {
 
   @@index([status, availableAt, id], map: "outbox_claim_idx")
   @@index([publishedAt])
+  @@index([aggregateType, aggregateId], map: "outbox_aggregate_idx")
   @@map("outbox")
 }
 
