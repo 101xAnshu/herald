@@ -22,53 +22,29 @@ Herald handles those cases explicitly:
 
 ## Architecture
 
-```
- producer
-    |
-    | POST /v1/events
-    v
-+---------+     one transaction      +----------+
-| ingest  | ------------------------> | Postgres |
-+---------+   notification           +----------+
-    |         timeline                    ^
-    |         outbox                      |
-    v                                     | claim + publish
- 202 Accepted                             |
-                                          v
-                                    +-----------+
-                                    |   relay   |
-                                    +-----------+
-                                          |
-              +---------------------------+---------------------------+
-              |             Kafka priority topics                     |
-              |  critical / high / normal / low events               |
-              +---------------------------+---------------------------+
-                                          |
-                                    +-----------+
-                                    |orchestr.  | policy, quiet hours,
-                                    +-----------+ caps, templates
-                                          |
-                                          v
-                                  fanout plan + deliveries
-                                          |
-                          +---------------+---------------+
-                          | Kafka delivery topics         |
-                          | critical/high/normal/low      |
-                          +---------------+---------------+
-                                          |
-                                    +-----------+
-                                    | delivery  | token bucket, provider
-                                    +-----------+ attempt, retry, terminal
-                                          |
-                    +---------------------+---------------------+
-                    |                     |                     |
-                  SMTP               in-app + SSE          mock push/SMS
-                    |                     |                     |
-                  Mailpit            inbox_items          deterministic
-                                                              outcomes
+```mermaid
+flowchart TD
+    P["Producer"] -->|"POST /v1/events"| API["Ingest API<br/>202 after commit"]
+    C["Campaign runner"] -->|"same ingest path"| API
+
+    API -->|"one transaction"| PG[("Postgres<br/>notification, timeline, outbox")]
+
+    PG -->|"claim committed rows"| R["Relay"]
+    R -->|"publish"| K1{{"Kafka priority topics"}}
+    K1 -->|"critical / high / normal / low"| O["Orchestrator<br/>policy, quiet hours, caps"]
+    O -->|"fanout plan + deliveries"| K2{{"Kafka delivery topics"}}
+    K2 -->|"critical / high / normal / low"| D["Delivery workers<br/>token bucket, retry, terminal"]
+
+    D --> SMTP["SMTP"]
+    D --> IN["In-app + SSE"]
+    D --> MOCK["Mock push / SMS"]
+
+    SMTP --> MP["Mailpit"]
+    IN --> INBOX[("inbox_items")]
+    MOCK --> OUT["Deterministic outcomes"]
 ```
 
-The API never renders a template, resolves a preference, or calls a provider. That is what keeps ingest fast during a delivery storm.
+Redis backs ingest rate limits, delivery token buckets, and in-app pub/sub. The API never renders a template, resolves a preference, or calls a provider. That is what keeps ingest fast during a delivery storm.
 
 ## Repository layout
 
