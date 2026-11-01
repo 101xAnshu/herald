@@ -3,207 +3,416 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Herald: notification delivery without the lost-event problem</title>
+    <title>Herald: nothing accepted is ever lost</title>
     <meta
       name="description"
-      content="Herald is a multi-channel notification platform: durable ingest, policy, fanout, retries, campaigns, and an in-app inbox in one local stack."
+      content="Herald commits the event, its timeline, and the outbox intent in one transaction. Every delivery after that is recoverable, observable, and idempotent."
     />
+    <link rel="preconnect" href="https://api.fontshare.com" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="nav">
-      <a class="brand" href="#top">
-        <span class="brand-mark">H</span>
-        <span>Herald</span>
-      </a>
-      <nav>
-        <a href="#architecture">Architecture</a>
-        <a href="#features">Features</a>
-        <a href="#quickstart">Quickstart</a>
-        <a href="https://github.com/101xAnshu/herald">GitHub</a>
-      </nav>
-    </header>
+    <div class="frame">
+    <div class="nav-wrap">
+      <header class="nav">
+        <a class="brand" href="#top">
+          <span class="brand-mark" aria-hidden="true">H</span>
+          Herald
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          <a href="#architecture">Architecture</a>
+          <a href="#receipts">Receipts</a>
+          <a href="#limits">Limits</a>
+          <a href="#quickstart">Quickstart</a>
+        </nav>
+        <a class="nav-cta" href="#quickstart">Run locally</a>
+        <details class="nav-menu">
+          <summary aria-label="Menu">Menu</summary>
+          <div class="nav-menu-links">
+            <a href="#architecture">Architecture</a>
+            <a href="#receipts">Receipts</a>
+            <a href="#limits">Limits</a>
+            <a href="#quickstart">Quickstart</a>
+          </div>
+        </details>
+      </header>
+    </div>
 
     <main id="top">
       <section class="hero">
-        <p class="eyebrow">Transactional notifications · campaigns · in-app inbox</p>
-        <h1>Send the message once.<br />Know exactly what happened next.</h1>
-        <p class="lede">
-          Herald accepts a business event, commits it with an outbox row, resolves policy per
-          recipient, splits fanout by priority, and carries every delivery to a traceable terminal
-          state. No lost events, no silent retries, no dashboard required to see the truth.
-        </p>
-        <div class="hero-actions">
-          <a class="button" href="#quickstart">Run it locally</a>
-          <a class="button ghost" href="https://github.com/101xAnshu/herald">Read the source</a>
-        </div>
-
-        <div class="terminal" aria-label="Quickstart terminal">
-          <div class="terminal-bar"><span></span><span></span><span></span></div>
-          <pre><code><span class="prompt">$</span> git clone https://github.com/101xAnshu/herald.git
-<span class="prompt">$</span> cd herald && pnpm install
-<span class="prompt">$</span> make demo
-<span class="prompt">$</span> pnpm herald demo
-
-<span class="muted"># accepted 0199f3f2-7d4a-7c3e-9b1a-2f6e5d4c3b2a</span>
-<span class="muted"># email accepted · in-app delivered · push accepted</span></pre>
-        </div>
-      </section>
-
-      <section class="metrics" aria-label="Design envelope">
-        <div><strong>10M</strong><span>events per day on the demo profile</span></div>
-        <div><strong>300M</strong><span>daily events in the design envelope</span></div>
-        <div><strong>&lt;150ms</strong><span>ingest p95 target</span></div>
-        <div><strong>0</strong><span>accepted events lost to a broker restart</span></div>
-      </section>
-
-      <section id="architecture" class="section">
-        <div class="section-head">
-          <p class="eyebrow">One durable path</p>
-          <h2>Accept first. Decide later.</h2>
-          <p>
-            Ingest does one thing: resolve the recipient, check idempotency, and commit the
-            notification, timeline event, and outbox row together. Everything expensive happens
-            after the producer gets a 202.
+        <div class="container">
+          <p class="proof">29k+ events <span class="proof-sep">·</span> open source</p>
+          <h1>Every notification,<br /><span>accounted for.</span></h1>
+          <p class="hero-lede">
+            Herald is an open-source notification system built on a transactional outbox.
+            One commit writes the event, its timeline, and the outbox. Then every
+            delivery is tracked to a terminal state. 29,989 events in, zero lost.
           </p>
+          <div class="hero-actions">
+            <a class="btn btn-dark" href="#quickstart">Run locally</a>
+            <a class="btn btn-light" href="https://github.com/101xAnshu/herald">View on GitHub</a>
+          </div>
+          <p class="hero-note">Free and open source. One command to run.</p>
         </div>
+      </section>
 
-        <div class="flow">
-          <div class="flow-step">
-            <span class="step">01</span>
-            <h3>Producer</h3>
-            <p>Business event with a stable idempotency key.</p>
+      <section class="section" id="architecture">
+        <div class="container">
+          <div class="section-head-row">
+            <div>
+              <span class="tag">How it works</span>
+              <h2>One promise,<br /><span class="muted">three mechanisms.</span></h2>
+            </div>
+            <div class="lede">
+              <p>Each mechanism exists for one reason: a notification must never silently disappear.</p>
+            </div>
           </div>
-          <div class="flow-arrow">→</div>
-          <div class="flow-step">
-            <span class="step">02</span>
-            <h3>Ingest</h3>
-            <p>Postgres transaction: notification, timeline, outbox.</p>
-          </div>
-          <div class="flow-arrow">→</div>
-          <div class="flow-step">
-            <span class="step">03</span>
-            <h3>Relay</h3>
-            <p><code>FOR UPDATE SKIP LOCKED</code> publishes to Kafka.</p>
-          </div>
-          <div class="flow-arrow">→</div>
-          <div class="flow-step">
-            <span class="step">04</span>
-            <h3>Policy</h3>
-            <p>Preferences, quiet hours, caps, suppression, templates.</p>
-          </div>
-          <div class="flow-arrow">→</div>
-          <div class="flow-step">
-            <span class="step">05</span>
-            <h3>Delivery</h3>
-            <p>Token bucket, provider attempt, retry or terminal state.</p>
-          </div>
-        </div>
 
-        <div class="split">
-          <div>
-            <h3>Priority is topology, not a promise</h3>
-            <p>
-              Critical, high, normal, and low work each get their own Kafka topic and consumer
-              group. A campaign cannot starve a security alert because they do not share a queue.
-            </p>
+          <div class="feature-row">
+            <div class="feature-copy">
+              <span class="tag">01 / Commit</span>
+              <h3>Accept first.<br /><span class="muted">Decide later.</span></h3>
+              <p class="lede">The event, its timeline, and the intent to publish commit in a single Postgres statement. Your API returns 202 only after the work is durable.</p>
+              <ul class="feature-list">
+                <li>One SQL statement, three writes</li>
+                <li>202 after the commit, never before</li>
+                <li>The outbox is the recovery plan</li>
+              </ul>
+              <a class="feature-link" href="#quickstart">See it run locally →</a>
+            </div>
+            <div class="feature-art grad-a">
+              <div class="mini-app">
+                <div class="mini-head"><b>one transaction</b><span>Postgres</span></div>
+                <div class="mini-row"><span class="table">notifications</span><span class="detail">event, recipient, policy</span><span class="action">insert</span></div>
+                <div class="mini-row"><span class="table">notification_events</span><span class="detail">append-only timeline</span><span class="action">insert</span></div>
+                <div class="mini-row"><span class="table">outbox</span><span class="detail">publish intent</span><span class="action">insert</span></div>
+              </div>
+            </div>
           </div>
-          <div>
-            <h3>Redis accelerates. Postgres decides.</h3>
-            <p>
-              Dedupe, rate limits, and token buckets live in Redis. If Redis disappears, limits
-              reset and dedupe falls back to the unique constraint. Accepted work is still safe.
-            </p>
+
+          <div class="feature-row is-reverse">
+            <div class="feature-copy">
+              <span class="tag">02 / Receipts</span>
+              <h3>Numbers,<br /><span class="muted">not adjectives.</span></h3>
+              <p class="lede">Don't take our word for it: every figure on this page comes from a run you can repeat with one command.</p>
+              <ul class="feature-list">
+                <li>29,989 events accepted in 10 minutes</li>
+                <li>0 failed requests at 50/s</li>
+                <li>4.10s from timeout to replay</li>
+              </ul>
+              <a class="feature-link" href="#receipts">See the receipts →</a>
+            </div>
+            <div class="feature-art grad-b">
+              <div class="mini-app">
+                <div class="mini-head"><b>backlog after 10 minutes</b><span>3 runs</span></div>
+                <svg class="mini-chart" viewBox="0 0 360 170" role="img" aria-label="Backlog after ten minutes: 0 at 50 per second, 543 at 60, 1,109 at 70">
+                  <line class="grid" x1="36" y1="32" x2="340" y2="32" />
+                  <line class="grid" x1="36" y1="82" x2="340" y2="82" />
+                  <line class="grid" x1="36" y1="132" x2="340" y2="132" />
+                  <text class="axis" x="30" y="36" text-anchor="end">1,200</text>
+                  <text class="axis" x="30" y="86" text-anchor="end">600</text>
+                  <text class="axis" x="30" y="136" text-anchor="end">0</text>
+                  <path class="area" d="M70 132 L200 92 L320 44 L320 132 Z" />
+                  <path class="line" d="M70 132 L200 92 L320 44" />
+                  <circle class="point" cx="70" cy="132" r="3" />
+                  <circle class="point" cx="200" cy="92" r="3" />
+                  <circle class="point" cx="320" cy="44" r="3" />
+                  <text class="axis" x="70" y="154" text-anchor="middle">50/s</text>
+                  <text class="axis" x="200" y="154" text-anchor="middle">60/s</text>
+                  <text class="axis" x="320" y="154" text-anchor="middle">70/s</text>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="feature-row">
+            <div class="feature-copy">
+              <span class="tag">03 / Trace</span>
+              <h3>The failure has<br /><span class="muted">a paper trail.</span></h3>
+              <p class="lede">When a provider times out, you see the whole story (unknown, dead letter, replay, recovered) under one trace ID.</p>
+              <ul class="feature-list">
+                <li>Policy hash and channels considered</li>
+                <li>Every attempt with error class and latency</li>
+                <li>Inbox state and outbox state in one place</li>
+              </ul>
+              <a class="feature-link" href="#quickstart">Replay it yourself →</a>
+            </div>
+            <div class="feature-art grad-c">
+              <div class="mini-app">
+                <div class="mini-head"><b>trace 6f3c21aa</b><span>4.10s</span></div>
+                <div class="mini-timeline">
+                  <div class="mini-event"><span class="dot"></span><time>0.00s</time><span>accepted</span><em>commit</em></div>
+                  <div class="mini-event"><span class="dot"></span><time>0.18s</time><span>fanout planned</span><em>3 channels</em></div>
+                  <div class="mini-event"><span class="dot bad"></span><time>0.55s</time><span>push unknown</span><em>dead letter</em></div>
+                  <div class="mini-event"><span class="dot"></span><time>3.81s</time><span>replay applied</span><em>same ID</em></div>
+                  <div class="mini-event"><span class="dot"></span><time>4.10s</time><span>recovered</span><em>1 item</em></div>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <section id="features" class="section">
-        <div class="section-head">
-          <p class="eyebrow">What is actually built</p>
-          <h2>Small surface. Real failure paths.</h2>
-        </div>
-        <div class="grid">
-          <article>
-            <h3>Transactional outbox</h3>
-            <p>
-              A committed notification is never acknowledged before its publish intent is durable.
-              The relay replays unpublished rows after a crash or a database promotion.
-            </p>
-          </article>
-          <article>
-            <h3>Policy snapshots</h3>
-            <p>
-              Every fanout decision stores the policy hash, the channels considered, and the reason
-              each one was allowed or suppressed. Weeks later the trace still explains itself.
-            </p>
-          </article>
-          <article>
-            <h3>Retries with full jitter</h3>
-            <p>
-              30 second base, 30 minute cap, per-channel attempt budgets. Permanent errors go
-              straight to failure. Ambiguous timeouts become <code>unknown</code>, not blind
-              retries.
-            </p>
-          </article>
-          <article>
-            <h3>Campaigns on the same pipeline</h3>
-            <p>
-              The runner calls the ingest service, not a shortcut. Pause stops the next batch.
-              Resume continues from the next pending recipient. The funnel is derived, not guessed.
-            </p>
-          </article>
-          <article>
-            <h3>Durable inbox and SSE</h3>
-            <p>
-              In-app delivery commits the inbox row and the delivery state together. Connected
-              clients get a live event; offline clients get the same row on reconnect.
-            </p>
-          </article>
-          <article>
-            <h3>Narrow failover drill</h3>
-            <p>
-              Streaming replication, standby promotion, application restart, and outbox replay. It
-              proves the data plane and says plainly what it does not prove.
-            </p>
-          </article>
+      <section class="tools" aria-label="Stack">
+        <div class="container">
+          <p>Runs on the stack you already have.</p>
+          <div class="tools-row">
+            <span>Node</span><span>Postgres</span><span>Kafka</span><span>Redis</span><span>Docker</span><span>Mailpit</span><span>GitHub</span>
+          </div>
         </div>
       </section>
 
-      <section id="quickstart" class="section quickstart">
-        <div>
-          <p class="eyebrow">Local, not mocked</p>
-          <h2>One command boots the real path.</h2>
-          <p>
-            Postgres, Redis, Kafka, Mailpit, the API, and the worker. Six partitions per priority
-            topic. A seeded 2,200-user Marlowe dataset. A campaign that pauses at 400 recipients and
-            resumes.
-          </p>
-          <ul class="checklist">
-            <li>Email arrives in Mailpit over SMTP.</li>
-            <li>In-app events stream over SSE.</li>
-            <li>Push and SMS use deterministic mock outcomes.</li>
-            <li><code>herald trace</code> follows one notification end to end.</li>
-          </ul>
+      <section class="section section-soft" id="receipts">
+        <div class="container">
+          <div class="section-head-row">
+            <div>
+              <span class="tag">Receipts</span>
+              <h2>Measured,<br /><span class="muted">not promised.</span></h2>
+            </div>
+            <div class="lede">
+              <p>One 10-minute run on a 4-core laptop, not a cloud benchmark. Every number is reproducible from the repository.</p>
+            </div>
+          </div>
+          <div class="key-stats">
+            <article class="key-stat">
+              <span class="stat-icon is-green" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M9 1 3 9h4l-1 6 6-8H8l1-6Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
+              <p class="value">29,989</p>
+              <p class="label">events accepted</p>
+              <span class="pill pill-ok"><i></i>0 failed</span>
+            </article>
+            <article class="key-stat">
+              <span class="stat-icon is-blue" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M8 1.5 13 3.5v4c0 3.5-2.5 5.5-5 7-2.5-1.5-5-3.5-5-7v-4l5-2Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="m5.8 7.5 1.6 1.6 2-2.4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></span>
+              <p class="value">0</p>
+              <p class="label">accepted events lost</p>
+              <span class="pill pill-ok"><i></i>SIGKILL tested</span>
+            </article>
+            <article class="key-stat">
+              <span class="stat-icon is-amber" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 1.5v3h-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
+              <p class="value">4.10s</p>
+              <p class="label">timeout to replay</p>
+              <span class="pill pill-ok"><i></i>same ID</span>
+            </article>
+          </div>
+          <p class="quiet-line">Also measured: 4.3M events/day · 71,052 deliveries · 11.6s p95 · 36s recovery after SIGKILL. Raw results ship with the repo.</p>
+      <section class="section section-soft" id="quickstart">
+        <div class="container">
+          <div class="section-head-row">
+            <div>
+              <span class="tag">Run it</span>
+              <h2>Running beats<br /><span class="muted">reading.</span></h2>
+            </div>
+            <div class="lede">
+              <p>Three setups, same guarantee. Pick the smallest one that proves it to you.</p>
+            </div>
+          </div>
+          <div class="run-grid">
+            <article class="run-card">
+              <span class="tag">Start here</span>
+              <p class="run-title">One command.</p>
+              <p class="run-copy">The smallest setup that shows the outbox and the trace end to end.</p>
+              <div class="run-code"><code>make demo</code><button class="mini-copy" type="button" data-copy="make demo">Copy</button></div>
+              <ul class="run-list">
+                <li>Postgres, Redis, Kafka, Mailpit</li>
+                <li>API and one core worker</li>
+                <li>A seeded notification you can trace</li>
+              </ul>
+              <a class="btn btn-light" href="https://github.com/101xAnshu/herald">Get the code</a>
+            </article>
+            <article class="run-card is-featured">
+              <span class="tag">Full demo</span>
+              <p class="run-title">The real path.</p>
+              <p class="run-copy">The full topology: API, workers, and a dataset that behaves like production.</p>
+              <div class="run-code"><code>pnpm herald demo</code><button class="mini-copy" type="button" data-copy="pnpm herald demo">Copy</button></div>
+              <ul class="run-list">
+                <li>API, core worker, 3 delivery workers</li>
+                <li>24 partitions per priority topic</li>
+                <li>2,200 seeded users and a paused campaign</li>
+              </ul>
+              <a class="btn btn-dark" href="https://github.com/101xAnshu/herald">Get the code</a>
+            </article>
+            <article class="run-card">
+              <span class="tag">Go deeper</span>
+              <p class="run-title">Break it yourself.</p>
+              <p class="run-copy">Kill processes, replay dead letters, and check that nothing goes missing.</p>
+              <div class="run-code"><code>pnpm herald doctor</code><button class="mini-copy" type="button" data-copy="pnpm herald doctor">Copy</button></div>
+              <ul class="run-list">
+                <li>Capacity model and 10-minute runs</li>
+                <li>Crash test with SIGKILL</li>
+                <li>Trace API and dead-letter replay</li>
+              </ul>
+              <a class="btn btn-light" href="https://github.com/101xAnshu/herald">Get the code</a>
+            </article>
+          </div>
         </div>
-        <pre class="code-card"><code>make demo
-pnpm herald init --demo
-pnpm herald doctor
+      </section>
 
-pnpm herald send booking.confirmed \
-  --user cust_00001 \
-  --data '{"booking_id":"bkg_8821","service":"plumbing","pro_name":"Ravi","scheduled_for":"2026-11-02T10:00:00+05:30","address_label":"Home"}'
+      <section class="section" id="limits">
+        <div class="container">
+          <div class="faq-grid">
+            <div>
+              <span class="tag">Scope</span>
+              <h2>Limits,<br /><span class="muted">written down.</span></h2>
+              <p class="lede">Herald is a local demo shaped like production, not production itself. What is missing is listed here, not hidden.</p>
+              <a class="feature-link" href="#receipts">Read the capacity model →</a>
+            </div>
+            <div class="faq-list">
+              <details open>
+                <summary>One Postgres shard, one Kafka broker, one Redis</summary>
+                <p>The demo keeps the dependency footprint small. It is not a claim about a multi-region deployment.</p>
+              </details>
+              <details>
+                <summary>Push and SMS are deterministic mocks</summary>
+                <p>Email goes to Mailpit. Push and SMS return scripted outcomes so the failure path is reproducible.</p>
+              </details>
+              <details>
+                <summary>300M events/day is a design target, not a measurement</summary>
+                <p>The measured ceiling is 4.3M events/day on the 4-core laptop used for the runs.</p>
+              </details>
+              <details>
+                <summary>Local tables are not partitioned</summary>
+                <p>Retention deletes in batches. Partitioning is the first change for a larger deployment.</p>
+              </details>
+            </div>
+          </div>
+        </div>
+      </section>
 
-pnpm herald campaign list
-pnpm herald campaign watch &lt;id&gt;
-pnpm herald stats</code></pre>
+      <section class="section section-soft" id="resources">
+        <div class="container">
+          <div class="section-head-row">
+            <div>
+              <span class="tag">Methods</span>
+              <h2>How the numbers<br /><span class="muted">were made.</span></h2>
+            </div>
+            <div class="lede">
+              <p>The benchmark, the crash test, and the scenarios are all in the repository, with the raw results beside them.</p>
+            </div>
+          </div>
+          <div class="resources-grid">
+            <a class="resource" href="#receipts">
+              <div class="resource-art grad-a">
+                <div class="mini-app">
+                  <div class="mini-head"><b>throughput</b><span>10 min</span></div>
+                  <div class="mini-row"><span class="table">events</span><span class="detail">accepted</span><span class="action">29,989</span></div>
+                  <div class="mini-row"><span class="table">requests</span><span class="detail">failed</span><span class="action">0</span></div>
+                  <div class="mini-row"><span class="table">replay</span><span class="detail">timeout to same ID</span><span class="action">4.10s</span></div>
+                </div>
+              </div>
+              <div class="resource-body">
+                <p class="resource-meta">June 2026 · Benchmark</p>
+                <p class="resource-title">How the 10-minute ceiling was measured</p>
+                <span class="resource-link">Read the method →</span>
+              </div>
+            </a>
+            <a class="resource" href="#limits">
+              <div class="resource-art grad-b">
+                <div class="mini-app">
+                  <div class="mini-head"><b>crash test</b><span>SIGKILL</span></div>
+                  <div class="mini-row"><span class="table">before</span><span class="detail">accepted</span><span class="action">712</span></div>
+                  <div class="mini-row"><span class="table">lost</span><span class="detail">no replay</span><span class="action">10</span></div>
+                  <div class="mini-row"><span class="table">after</span><span class="detail">accepted</span><span class="action">656</span></div>
+                  <div class="mini-row"><span class="table">lost</span><span class="detail">replayed</span><span class="action">0</span></div>
+                </div>
+              </div>
+              <div class="resource-body">
+                <p class="resource-meta">May 2026 · Crash test</p>
+                <p class="resource-title">What survived SIGKILL</p>
+                <span class="resource-link">Read the run →</span>
+              </div>
+            </a>
+            <a class="resource" href="#quickstart">
+              <div class="resource-art grad-c">
+                <div class="mini-app">
+                  <div class="mini-head"><b>campaigns</b><span>2,200 users</span></div>
+                  <div class="mini-row"><span class="table">queued</span><span class="detail">at pause</span><span class="action">1,000</span></div>
+                  <div class="mini-row"><span class="table">delivered</span><span class="detail">same pipeline</span><span class="action">955</span></div>
+                  <div class="mini-row"><span class="table">resume</span><span class="detail">next batch</span><span class="action">400</span></div>
+                </div>
+              </div>
+              <div class="resource-body">
+                <p class="resource-meta">April 2026 · Scenarios</p>
+                <p class="resource-title">Campaigns, retries, and the failure path</p>
+                <span class="resource-link">Read the scenarios →</span>
+              </div>
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section class="cta">
+        <div class="container">
+          <h2>Stop losing<br /><span style="color: var(--gray)">notifications quietly.</span></h2>
+          <p>Run the demo, trace one notification, and check the receipts yourself.</p>
+          <div class="hero-actions">
+            <a class="btn btn-dark" href="#quickstart">Run locally</a>
+            <a class="btn btn-light" href="https://github.com/101xAnshu/herald">View on GitHub</a>
+          </div>
+          <p class="hero-note">Free and open source. MIT licensed.</p>
+        </div>
       </section>
     </main>
 
-    <footer>
-      <span>Herald</span>
-      <span>MIT licensed · Node · Postgres · Kafka · Redis</span>
-      <a href="https://github.com/101xAnshu/herald">github.com/101xAnshu/herald</a>
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-top">
+          <div class="footer-brand">
+            <a class="brand" href="#top"><span class="brand-mark" aria-hidden="true">H</span>Herald</a>
+            <p>Transactional notifications on an outbox. Every accepted event reaches a terminal state.</p>
+          </div>
+          <div class="footer-cols">
+            <div class="footer-col">
+              <h5>Product</h5>
+              <a href="#architecture">Architecture</a>
+              <a href="#receipts">Receipts</a>
+              <a href="#limits">Limits</a>
+              <a href="#quickstart">Quickstart</a>
+            </div>
+            <div class="footer-col">
+              <h5>Resources</h5>
+              <a href="#receipts">Benchmark</a>
+              <a href="#limits">Crash test</a>
+              <a href="#resources">Scenarios</a>
+              <a href="https://github.com/101xAnshu/herald">GitHub</a>
+            </div>
+            <div class="footer-col">
+              <h5>Legal</h5>
+              <a href="https://github.com/101xAnshu/herald/blob/main/LICENSE">MIT license</a>
+              <a href="https://github.com/101xAnshu/herald">Source</a>
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <span>© 2026 Herald</span>
+          <span>MIT licensed · Node · Postgres · Kafka · Redis</span>
+        </div>
+      </div>
     </footer>
+    </div>
+    <script>
+      // Copy run commands
+      document.querySelectorAll('[data-copy]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          const prev = btn.textContent;
+          try {
+            await navigator.clipboard.writeText(btn.getAttribute('data-copy'));
+            btn.textContent = 'Copied';
+          } catch {
+            btn.textContent = 'Copy failed';
+          }
+          setTimeout(() => { btn.textContent = prev; }, 1600);
+        });
+      });
+      // Close the mobile menu after choosing a link
+      document.querySelectorAll('.nav-menu-links a').forEach((a) => {
+        a.addEventListener('click', () => {
+          const menu = document.querySelector('.nav-menu');
+          if (menu) menu.removeAttribute('open');
+        });
+      });
+    </script>
   </body>
 </html>
