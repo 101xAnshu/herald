@@ -75,7 +75,7 @@ const options: Options = {
   connections: Number(option("connections", "20")),
   duration: Number(option("duration", "15")),
   warmup: Number(option("warmup", "3")),
-  users: Math.max(1, Math.min(1_000, Number(option("users", "500")))),
+  users: Math.max(1, Math.min(1_400, Number(option("users", "500")))),
   json: flag("json"),
 };
 

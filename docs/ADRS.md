@@ -98,13 +98,13 @@ Short records for the choices that shape the build.
 
 **Consequence.** Local retention deletes rows in batches instead of dropping partitions. At design scale, partitioning is mandatory and the retention job must switch to partition management.
 
-## ADR-013: Four API workers in one container
+## ADR-013: API workers in one container
 
-**Decision.** The API container runs four Node worker processes through `API_WORKERS`, sharing port 3000 through Node cluster.
+**Decision.** The API container runs Node worker processes through `API_WORKERS`, sharing port 3000 through Node cluster. The demo defaults to two and uses four when measuring the ingest ceiling with the worker stopped.
 
-**Why.** One Node process saturates one core before the database does. Four processes raised measured ingest from about 170 to 753 events/s on the demo laptop with the same services and durability.
+**Why.** One Node process saturates one core before the database does. Four processes raised measured ingest from about 170 to 753 events/s on the demo laptop with the same services and durability. In the full pipeline the delivery and database work needs the CPU more than ingest does, so two API workers leave more room.
 
-**Consequence.** Each worker has its own Prisma pool and metrics registry. `/metrics` returns the counters for one worker, not the sum. The demo environment uses four because the laptop has eight threads.
+**Consequence.** Each worker has its own Prisma pool and metrics registry. `/metrics` returns the counters for one worker, not the sum.
 
 ## ADR-014: One SQL statement for ingest writes
 
@@ -124,8 +124,32 @@ Short records for the choices that shape the build.
 
 ## ADR-016: Recover lost queue work from Postgres
 
-**Decision.** The scheduler reclaims deliveries stuck in `pending`, `sending`, or `retry_scheduled` for 30 seconds, and republishes accepted notifications with no fanout plan after 30 seconds.
+**Decision.** The scheduler reclaims `sending` deliveries older than 30 seconds. It also recovers `pending` deliveries and `accepted` notifications older than 60 seconds, but only when no published outbox row exists for that work. Recovery sweeps run every 10 seconds; due retries and deferred notifications are promoted every second.
 
-**Why.** Kafka offsets can advance across messages that were published but not processed before a worker crash. The notification and outbox rows are already durable, so Postgres can rebuild the missing work.
+**Why.** A worker can die between a database commit and an offset commit. The notification and outbox rows are already durable, so Postgres can rebuild the missing work. An earlier version recovered every `pending` row after 30 seconds without checking the outbox. Under load that republished work that was still queued, which amplified the load on the same Kafka partitions and made the backlog worse.
 
-**Consequence.** A delivery can be attempted more than once. The delivery claim and provider idempotency key make the retry harmless. The recovery adds one scheduler query per second per shard.
+**Consequence.** A delivery can be attempted more than once. The delivery claim and provider idempotency key make the retry harmless. Work with a published outbox row is trusted to Kafka; the relay's producer acknowledgement and Kafka's retention cover that path.
+
+## ADR-017: Separate delivery workers
+
+**Decision.** The worker image is deployed twice: one core process for relay, orchestrator, scheduler, reconciler, campaign, and retention, and three delivery-only processes. Consumers process up to `CONSUMER_CONCURRENCY` partitions at once.
+
+**Why.** In one process, delivery competed with every other role for a single core, and KafkaJS consumed one partition at a time by default. Splitting the roles and raising partition concurrency moved the full pipeline from below 50 events/s with a growing backlog to a sustained 50 events/s with an empty queue.
+
+**Consequence.** There are more processes and more database pools to size. The compose file keeps each delivery pool at 10 connections and the core pool at 10, under the 200 connection limit. Delivery is now the role to scale horizontally; the core roles stay at one replica and rely on advisory locks and `SKIP LOCKED` if they are ever duplicated.
+
+## ADR-018: Lease and batch the outbox relay
+
+**Decision.** The relay claims a batch with `FOR UPDATE SKIP LOCKED`, moves `available_at` forward, commits, and publishes after the transaction in one produce request per topic.
+
+**Why.** The previous version published one message per request while holding the claim transaction open. That kept a database connection busy for every broker round trip and made the relay a poor use of both Postgres and Kafka.
+
+**Consequence.** A crash after the lease but before publish delays the batch until the lease expires. A duplicate publish is still possible, and the existing idempotency constraints make it harmless.
+
+## ADR-019: Short-lived caches on the send path
+
+**Decision.** The suppression index is cached per process for five seconds, provider fault flags for one second, and published templates for five seconds. Template changes publish a Redis invalidation so other processes clear their copy immediately.
+
+**Why.** Each of those reads was a database round trip per delivery or per event. The suppression table is small, the fault flag only matters during a demo failure injection, and templates change rarely.
+
+**Consequence.** A suppression added directly to the database can take up to five seconds to take effect in a process that already loaded the index. The ops API does not add suppressions at runtime. Fault injection and template changes are visible within one second and five seconds respectively, and template changes are immediate through pub/sub while Redis is healthy.

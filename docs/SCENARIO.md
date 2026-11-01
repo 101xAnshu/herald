@@ -40,11 +40,11 @@ The scenario asserts:
 - The inbox has one item for the notification.
 - The outbox drains.
 
-The recorded local run completed the full path in about 4.3 seconds.
+The recorded local run completed the full path in about 4.1 seconds.
 
 ## Worker kill
 
-`make scenario-kill` accepts 24 booking events, waits briefly, kills the worker with SIGKILL, restarts it, and waits for every notification to reach a terminal state.
+`make scenario-kill` accepts 24 booking events, waits briefly, kills the core worker and all delivery workers with SIGKILL, restarts them, and waits for every notification to reach a terminal state.
 
 The scenario checks:
 
@@ -53,13 +53,13 @@ The scenario checks:
 - No channel has two deliveries for the same notification.
 - The outbox drains.
 
-The scheduler recovers `pending`, `sending`, and `retry_scheduled` deliveries that are older than 30 seconds. It also republishes `accepted` notifications that have no fanout plan and are older than 30 seconds. Those paths cover lost Kafka messages and workers that die between a database commit and offset commit.
+The scheduler reclaims `sending` deliveries older than 30 seconds. It also recovers `pending` deliveries older than 60 seconds and `accepted` notifications without a fanout plan older than 60 seconds, but only when no published outbox row exists for that work. That covers a worker that dies mid-attempt and rows that were committed but never published, without republishing work that is already queued in Kafka. Recovery sweeps run every 10 seconds; due retries are still promoted every second.
 
-The recorded local run recovered 24 notifications in about 32.5 seconds after SIGKILL.
+The recorded local run recovered 24 notifications in about 36 seconds after SIGKILL.
 
 ## Failover
 
-`make scenario-failover` runs the existing Postgres standby drill. It promotes the standby, starts the API and worker against it, and waits for the outbox to drain. It is separate because it stops the default stack.
+`make scenario-failover` runs the existing Postgres standby drill. It promotes the standby, starts the API, core worker, and delivery workers against it, and waits for the outbox to drain. It is separate because it stops the default stack.
 
 ## What is not covered
 

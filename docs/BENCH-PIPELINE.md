@@ -1,62 +1,153 @@
 # Full pipeline load test
 
-This is a load test with the worker running, not an ingest-only test. The worker is one process hosting all roles. The API runs four Node workers, the database pool is 30, and the three transactional channels are active.
+This is a load test with every pipeline stage active: ingest, fanout, delivery,
+retries, and the inbox. It is separate from the ingest-only benchmark in
+`docs/BENCH-HTTP.md`.
 
-Hardware: Intel i5-10300H, 8 threads, 15 GiB RAM, one SSD, Docker Compose.
+Hardware: Intel i5-10300H, 4 cores and 8 threads, 15 GiB RAM, one SSD, Docker
+Compose on the same machine.
 
-Load shape: booking events only, 40 connections, 10 second warmup. The same 500 seeded customers are reused, so frequency caps affect the longer run.
+## Topology
 
-## 200 events per second
+| Component | Setting |
+|---|---|
+| API | 2 Node workers, DB pool 15 per worker |
+| Core worker | relay, orchestrator, scheduler, reconciler, campaign, retention |
+| Delivery workers | 3 processes, delivery role only, DB pool 10 each |
+| Kafka partitions | 24 per topic |
+| Partitions consumed concurrently | 16 per consumer |
+| Provider rate limit | 600 attempts/s per channel, leased in chunks |
+| Postgres | `max_connections=200`, `shared_buffers=1GB`, `max_wal_size=4GB`, WAL compression off |
+
+## Workload
+
+- `booking.confirmed` events through `POST /v1/events`.
+- Three transactional channels per event: email, in-app, push.
+- 1,400 distinct recipients, cycled. The seed contains 1,400 customers and 600
+  professionals, so the run never hits an unknown recipient.
+- 40 connections, 10 second warmup.
+- Frequency caps were raised for this test so the measurement reflects transport
+  capacity rather than policy deferral. With the seeded caps, a share of the
+  events is scheduled for the next local day instead of delivered.
+
+## 50 events per second, 10 minutes
 
 | Field | Value |
 |---|---|
-| Target | 200 events/s |
-| Duration | 600 s |
-| Accepted | 117,494 |
-| Achieved accept rate | 195.8/s |
-| HTTP p50, p95, p99 | 40.3 ms, 312.1 ms, 560.1 ms |
-| Non-2xx | 0 |
-| Outbox pending at end of load | 36,815 |
-| Notifications delivered at end of load | 5,647 |
-| Delivery attempts in the run | 18,255 |
-| Delivery attempts per second | 30.4 |
-| Notification p50, p95, p99 | 642.3 s, 832.8 s, 886.6 s |
-| Outbox p50, p95, p99 | 86.6 s, 153.0 s, 153.9 s |
-| API CPU average | 59.3% of one core |
-| Worker CPU average | 86.2% of one core |
-| Postgres CPU average | 167.2% of one core |
-| Kafka CPU average | 45.6% of one core |
-| Redis CPU average | 5.5% of one core |
+| Requests sent | 29,989 |
+| Accepted (2xx) | 29,989 |
+| Rejected (4xx) | 0 |
+| Server errors (5xx) | 0 |
+| Timeouts | 0 |
+| Throughput | 50.0 events/s |
+| HTTP mean | 96.8 ms |
+| HTTP p50, p90, p95, p99 | 55.9 ms, 179.2 ms, 366.3 ms, 810.8 ms |
+| HTTP max | 1889.2 ms |
+| Notifications created | 30,495 |
+| Notifications terminal | 30,495 |
+| Notifications lost | 0 |
+| End-to-end p50, p95, p99 | 3.90 s, 11.55 s, 13.90 s |
+| Fanout p50, p95 | 2.51 s, 9.23 s |
+| Delivery attempts | 71,052 |
+| Delivery attempts per second | 114.6 |
+| Outbox publish p50, p95, p99 | 0.32 s, 0.83 s, 1.95 s |
+| Outbox publish max | 3.29 s |
+| Max outbox pending | 157 rows |
+| Max notifications awaiting fanout | 502 |
+| DLQ depth | 0 |
+| Notifications still open after the load | 0 |
 
-The API accepted every request. The worker did not keep up. Five minutes after the load stopped, 106,288 notifications were still open and 12,524 had reached a terminal state. The outbox was drained, so the relay was not the bottleneck.
+Every accepted request produced exactly one notification, and every notification
+reached a terminal state. The queue was empty when the run ended, so the rate was
+sustained, not borrowed from backlog.
 
-## 50 events per second
+CPU during the run, as a percentage of one core:
 
-| Field | Value |
-|---|---|
-| Target | 50 events/s |
-| Duration | 600 s |
-| Accepted | 30,025 |
-| Achieved accept rate | 50.0/s |
-| HTTP p50, p95, p99 | 35.8 ms, 156.3 ms, 527.1 ms |
-| Non-2xx | 0 |
-| Notifications delivered at end of load | 10,152 |
-| Notifications pending after 5 minutes | 2,284 |
-| Notifications deferred by frequency caps | 9,962 |
-| Delivery attempts in the run | 24,120 |
-| Delivery attempts per second | 40.2 |
-| Notification p50, p95, p99 | 376.9 s, 588.3 s, 617.7 s |
-| Outbox p50, p95, p99 | 0.257 s, 0.508 s, 0.685 s |
-| Worker CPU average | 96.2% of one core |
+| Container | Average | Peak |
+|---|---|---|
+| API (2 workers) | 27.1% | 84.0% |
+| Core worker | 80.9% | 117.7% |
+| Delivery worker 1 | 57.1% | 97.4% |
+| Delivery worker 2 | 53.9% | 114.9% |
+| Delivery worker 3 | 56.1% | 110.9% |
+| Postgres | 158.2% | 278.6% |
+| Kafka | 53.5% | 238.5% |
+| Mailpit | 21.6% | 56.5% |
+| Redis | 5.1% | 13.0% |
 
-The worker was saturated on one CPU core. The run reused 500 customers, so frequency caps deferred 9,962 notifications and reduced the delivery work. That makes this run unsuitable as a clean capacity number.
+## Capacity curve
 
-## Conclusion
+Three runs on the same build, each with a 10 second warmup:
 
-The ingest path can accept 700 to 750 events per second with the worker stopped. The full pipeline does not sustain 50 events per second on this laptop with one worker process.
+| Target | Duration | Accepted | End-to-end p95 | End-of-run backlog | Drain time |
+|---|---|---|---|---|---|
+| 50/s | 600 s | 29,989 | 11.6 s | 0 | 0 s |
+| 60/s | 120 s | 7,214 | 12.2 s | 543 notifications | 11 s |
+| 70/s | 60 s | 4,217 | 21.8 s | 1,109 notifications | 25 s |
 
-The bottleneck is the worker, not the relay or the API. At 50 events/s the worker used 96.2% of one core and still had 2,284 notifications open five minutes after the load stopped. At 200 events/s the backlog reached 106,288 open notifications.
+50 events/s is the sustained rate on this laptop. 60 events/s runs just ahead of
+the drain rate and leaves a short queue. 70 events/s exceeds capacity: the backlog
+grows during the run and takes about as long as the run to clear.
 
-The outbox stayed healthy. At 200 events/s its p99 publish latency was 153.9 seconds because the table was backlogged, but it drained to zero after the load stopped. At 50 events/s its p99 publish latency was 0.685 seconds.
+At 50 events/s the pipeline moves 4.3M events per day. Each event produced about
+2.33 deliveries, so that is roughly 10M delivery attempts per day. This is a
+laptop measurement, not a production claim.
 
-A real full-pipeline capacity number needs worker replicas or batched delivery writes, and a workload with enough distinct users to avoid frequency caps.
+## What limited it before
+
+The first full-pipeline run in this repository did not sustain 50 events/s.
+
+The causes, in the order they were found:
+
+1. KafkaJS processes one partition at a time by default. The orchestrator and the
+   delivery consumer were each limited to a single in-flight message, regardless
+   of how many partitions they owned. The consumer now sets
+   `partitionsConsumedConcurrently`.
+2. Delivery ran inside the same process as the relay, scheduler, reconciler,
+   campaign, and retention loops. One core hosted every role. Delivery now runs in
+   its own service with three replicas.
+3. The relay published one message per Kafka request while holding a database
+   transaction open, including the `FOR UPDATE` claim. It now leases a batch,
+   commits, then publishes one request per topic.
+4. The scheduler reclaimed `pending` deliveries after 30 seconds even when the
+   outbox row was already published. Under load that republished queued work,
+   which added more work to the same partitions. Recovery now checks for a
+   published outbox row and only recovers work that is actually missing.
+5. The delivery path issued a suppression query, a provider fault query, a
+   notification re-read, and a sibling-status read for every attempt. The
+   suppression list and the fault flag are now cached for a few seconds, and the
+   notification status is recomputed and conditionally updated in one SQL
+   statement inside the finalize transaction.
+6. The orchestrator fetched templates and wrote deliveries and outbox rows one at
+   a time. Templates are cached with pub/sub invalidation, and deliveries and
+   outbox rows are written with `createMany`.
+7. A delivery whose row no longer existed threw from the consumer, which blocked
+   its Kafka partition on the same offset forever. Missing deliveries are now
+   acknowledged.
+
+## Reading the numbers
+
+- The end-to-end latency includes queue time. At 50 events/s the p50 is under
+  4 seconds and the p95 is about 12 seconds. At 60 events/s the tail grows.
+- Postgres is the largest consumer at about 1.6 cores. The next step for more
+  headroom is batched delivery writes, not more worker processes: three delivery
+  processes already leave CPU idle while waiting on the database.
+- The outbox relay is not the bottleneck. Its p99 publish latency stayed under
+  2 seconds for the whole run.
+- The frequency cap change matters. With the seeded caps, email is limited to 5
+  per user per day, so a long run defers a large share of email deliveries. That
+  is the policy working, but it makes the transport measurement smaller and
+  noisier, which is why caps are lifted for this test.
+
+## Reproduce
+
+```bash
+make demo
+pnpm bench:http --rate 50 --connections 40 --duration 600 --warmup 10 \
+  --users 1400 --worker running --output /tmp/bench-pipeline.md
+```
+
+The harness writes the HTTP section to the output path. The pipeline percentiles
+and the CPU table above were collected from Postgres and `docker stats` during the
+same run. Raise `PROVIDER_RATE_LIMIT` if the provider quota is lower than the
+target rate.

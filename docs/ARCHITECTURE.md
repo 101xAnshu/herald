@@ -15,9 +15,9 @@ This document describes the system that is actually in the repository. It does n
 | Component | Responsibility |
 |---|---|
 | API | Authentication, validation, ingest, read APIs, SSE, metrics |
-| Worker: relay | Claims unpublished outbox rows and publishes them to Kafka |
-| Worker: orchestrator | Resolves policy, writes the fanout plan, creates deliveries |
-| Worker: delivery | Claims a delivery, calls a provider, records the attempt |
+| Core worker: relay | Leases unpublished outbox rows and publishes them to Kafka in topic batches |
+| Core worker: orchestrator | Resolves policy, writes the fanout plan, creates deliveries |
+| Delivery worker | Claims a delivery, calls a provider, records the attempt |
 | Worker: scheduler | Promotes due retries, deferred notifications, scheduled campaigns |
 | Worker: reconciler | Resolves `unknown` deliveries through a provider status lookup |
 | Worker: campaign | Materializes audiences, emits campaign events, paces batches |
@@ -31,7 +31,14 @@ This document describes the system that is actually in the repository. It does n
 | Cache | Redis store, fixed-window limits, token buckets, pub/sub |
 | Providers | SMTP, in-app, mock push, mock SMS |
 
-The API and worker share Postgres tables and Kafka topics but never share process memory. The campaign runner imports `ingestEvent` from `@herald/db`; it does not call the HTTP API and does not have a separate write path.
+The API and workers share Postgres tables and Kafka topics but never share process memory. The campaign runner imports `ingestEvent` from `@herald/db`; it does not call the HTTP API and does not have a separate write path.
+
+`WORKER_ROLES` selects what a container runs. The demo starts two kinds:
+
+- `worker` runs `relay,orchestrator,scheduler,reconciler,campaign,retention`.
+- `worker-delivery` runs `delivery` only, with three replicas.
+
+Delivery is separated because it is the only role that scales with provider calls and delivery state writes. The core roles are cheap and run once. Both consumer types set `partitionsConsumedConcurrently`, because KafkaJS processes a single partition at a time by default even when a consumer owns many. The demo topics have 24 partitions.
 
 ## Dependency direction
 
@@ -69,20 +76,7 @@ The transaction is the boundary. There is no point after commit where the event 
 
 ## Outbox relay
 
-The relay claims rows with:
-
-```sql
-SELECT id
-FROM outbox
-WHERE status = 'pending' AND available_at <= now()
-ORDER BY available_at, id
-LIMIT $1
-FOR UPDATE SKIP LOCKED
-```
-
-It publishes each row, then marks the claimed rows published in the same transaction. A publish failure increments `attempts`, stores `last_error`, and backs off. Ten failures mark the row `failed` for an operator.
-
-A crash after publish but before commit republishes the message. The orchestrator's unique fanout plan and idempotent delivery constraints make that harmless.
+The relay leases a batch of unpublished rows with `FOR UPDATE SKIP LOCKED`, pushes `available_at` forward by 30 seconds, and commits. It publishes after the transaction, grouping the batch by topic so one topic becomes one produce request. A publish failure increments `attempts`, stores `last_error`, and backs off; ten failures mark the row `failed` for an operator. A crash between the lease and the publish leaves the rows pending; they become eligible again when the lease expires. Publishing inside the transaction would hold a database connection for every broker round trip.
 
 ## Orchestration
 
@@ -112,7 +106,7 @@ The result is one of:
 
 For `process`, template selection uses the event type policy key, or `data.template_key`, then locale fallback. The fanout plan stores the policy hash, the full policy snapshot, and the channel decisions. Deliveries are created with a provider name and a template version.
 
-The Kafka offset is committed by the consumer only after this transaction returns.
+The Kafka offset is committed by the consumer only after this transaction returns. Both consumer roles process up to `CONSUMER_CONCURRENCY` partitions in parallel.
 
 ## Delivery
 
@@ -121,11 +115,16 @@ The Kafka offset is committed by the consumer only after this transaction return
 Before the provider call:
 
 - The delivery is marked `sending`.
-- Suppression is checked again for the address or device hash.
+- Suppression is checked again for the address or device hash. Each process keeps a five second copy of the suppression index instead of querying per delivery.
 - The template is rendered. Missing variables and oversized output are permanent failures.
-- A Redis token bucket is acquired for the channel.
+- A provider fault flag is read from a one second cache.
+- A Redis token bucket is acquired for the channel. Each process leases a small chunk of tokens and spends them locally, so the shared quota is enforced without one Redis call per message. A process that has no token waits; it never sends without one.
 
 The adapter receives a stable idempotency key, `herald:<delivery_id>`, and the trace ID. The attempt row records the attempt number, provider, request ID, result, error class, error code, latency, and response metadata.
+
+Finalizing a delivery is one transaction. It updates the delivery, inserts the attempt, writes the inbox row for in-app, writes the retry schedule or retry state when needed, recomputes the notification status with one SQL statement, appends the timeline event, and syncs the campaign recipient only for `campaign.message` notifications. The inbox row is returned from the transaction, so the SSE publish does not need a second read.
+
+If the delivery row no longer exists, the consumer logs and acknowledges the message. Retrying it would block that Kafka partition on the same offset forever.
 
 Outcomes:
 
@@ -189,7 +188,9 @@ The scheduler uses a Postgres advisory lock per shard. It promotes:
 
 The reconciler inspects deliveries in `unknown` every second and only considers them after two seconds. The mock status resolver confirms mock provider IDs. A delivery without a provider message ID fails reconciliation with a permanent `missing_provider_id` code and writes a DLQ row.
 
-The scheduler also recovers work that Postgres holds but Kafka no longer delivers. Every second it reclaims `pending`, `sending`, and `retry_scheduled` deliveries older than 30 seconds, and it republishes `accepted` notifications without a fanout plan that are older than 30 seconds. A crash between commit and offset commit therefore becomes a retry, not a stuck notification.
+The scheduler also recovers work that Postgres holds but Kafka no longer delivers. It reclaims `sending` deliveries older than 30 seconds, and `pending` deliveries or `accepted` notifications older than 60 seconds only when no published outbox row exists for that work. A crash between commit and offset commit therefore becomes a retry, not a stuck notification, while work that is already queued is not republished.
+
+The recovery sweeps run every 10 seconds. Due retries and deferred notifications are still promoted every second, because they are normal scheduling rather than repair.
 
 ## Retention
 

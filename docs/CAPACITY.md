@@ -11,11 +11,11 @@ The numbers here are estimates with stated assumptions. They are not benchmark r
 | Peak factor | 10x | 10x |
 | Peak ingest rate | 1,160/s | 34,720/s |
 | Postgres shards | 1 | 12 |
-| Kafka partitions per topic | 6 | 48 |
+| Kafka partitions per topic | 24 | 48 |
 | Kafka brokers | 1 | 6 |
 | Redis | 1 node | 3 shards with replicas |
 | API processes | 4 | 8 |
-| Worker processes | 1 | 24 |
+| Worker processes | 4 (1 core, 3 delivery) | 24 |
 | Hot Postgres retention | 14 days | 14 days |
 | Kafka retention | 24 hours events and deliveries | 72 hours |
 | Inbox retention | 30 days | 30 days default, 180 maximum |
@@ -28,7 +28,7 @@ The numbers here are estimates with stated assumptions. They are not benchmark r
 - A campaign targets at most 30M users and runs over hours, not seconds.
 - Peak traffic is 10x the daily average. This covers evening booking peaks and a campaign launch.
 - Provider throughput is the real ceiling for delivery. Herald can enqueue faster than any provider accepts.
-- The local benchmark runs one API container with four Node workers and one worker process on an 8-thread laptop.
+- The local benchmark runs one API container with two Node workers, one core worker, and three delivery workers on an 8-thread laptop.
 
 ## Throughput math
 
@@ -135,7 +135,7 @@ Retention: 24 hours
 Storage: about 80 GB across topics
 ```
 
-One broker with six partitions per topic is enough for the demo.
+One broker with 24 partitions per topic is enough for the demo.
 
 ### 300M/day
 

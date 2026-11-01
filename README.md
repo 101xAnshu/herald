@@ -75,7 +75,7 @@ The API never renders a template, resolves a preference, or calls a provider. Th
 ```
 apps/
   api/          Express 5 app, modules, middleware, SSE
-  worker/       relay, orchestrator, delivery, scheduler, reconciler, campaign, retention
+  worker/       core roles and the delivery role, selected by WORKER_ROLES
   cli/          herald command tree
 packages/
   config/       Zod environment schema and derived config
@@ -314,9 +314,9 @@ make verify               # build, lint, typecheck, unit tests, smoke test
 
 ## Scale
 
-The demo profile is sized for a laptop: one Postgres shard, one Kafka broker, one Redis, one API container with four Node workers, and one worker process.
+The demo profile is sized for a laptop: one Postgres shard, one Kafka broker, one Redis, one API container, one core worker, and three delivery workers. The API runs two Node workers by default; the core worker owns the relay, orchestrator, scheduler, reconciler, campaign, and retention loops; the delivery workers only claim and send deliveries. Kafka topics have 24 partitions.
 
-`make scenario` runs the failure paths without extra setup. The timeout scenario takes about 4.3 seconds to reach recovery. The worker kill scenario recovered 24 notifications in about 32.5 seconds. Both write reports under `scenario-results/`, which is ignored by git. See `docs/SCENARIO.md`.
+`make scenario` runs the failure paths without extra setup. The timeout scenario takes about 4.1 seconds to reach recovery. The worker kill scenario recovered 24 notifications in about 36 seconds. Both write reports under `scenario-results/`, which is ignored by git. See `docs/SCENARIO.md`.
 
 The design envelope is 10M events per day locally and 300M events per day with 12 Postgres shards and 48 Kafka partitions per priority topic. `docs/CAPACITY.md` gives the throughput math, storage estimates, and cost assumptions. The capacity numbers are estimates, not a benchmark claim.
 
@@ -326,7 +326,7 @@ With `API_WORKERS=4`, `DB_POOL_MAX=30`, the tuned Postgres settings in `compose.
 
 A separate closed-loop Node client recorded 516 events/s with the same load settings, p50 10.6 ms, p95 77.2 ms, and p99 493.7 ms. Its lower p50 is service time, not queue time. Its p99 is worse because the client, not the API, saturates first. See `docs/BENCH.md`.
 
-A full-pipeline run with the worker active is documented in `docs/BENCH-PIPELINE.md`. It did not sustain 50 events/s on this laptop. The worker saturated one CPU core and the backlog grew. This is separate from the ingest-only benchmark.
+The full pipeline is benchmarked separately in `docs/BENCH-PIPELINE.md`. With all three channels active, 24 Kafka partitions, one core worker, and three delivery workers, the pipeline sustained 50 events/s for 10 minutes: 29,989 requests, zero errors, zero lost notifications, p95 end-to-end 11.6 seconds, and an empty queue at the end. 60 events/s runs just ahead of the drain rate; 70 events/s exceeds capacity on this laptop. Postgres, not the relay, is the first limit.
 
 The 1,000 events/s target was not reached. At a 1,000 target the API accepted about 729 events/s with p99 180 ms in the best run, and the tail moved between 130 and 443 ms across repeated runs. The system is close to the CPU limit of this laptop, not to a configurable bottleneck. With four API workers, `/metrics` reports one worker's registry, not the sum; `/v1/ops/stats` reads the database and stays aggregate.
 
