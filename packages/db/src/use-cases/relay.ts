@@ -7,6 +7,17 @@ export interface RelayResult {
   failed: number;
 }
 
+interface OutboxRow {
+  id: string;
+  topic: string;
+  partition_key: string;
+  payload: unknown;
+  headers: unknown;
+  attempts: number;
+}
+
+const LEASE_MS = 30_000;
+
 const headersOf = (value: unknown): MessageHeaders => {
   if (!value || typeof value !== "object") {
     return {};
@@ -20,6 +31,12 @@ const headersOf = (value: unknown): MessageHeaders => {
   );
 };
 
+/**
+ * The relay leases a batch with `FOR UPDATE SKIP LOCKED`, commits, and only
+ * then publishes. Publishing inside the transaction would hold a database
+ * connection for every broker round trip. Messages are grouped by topic so one
+ * batch becomes one produce request per topic.
+ */
 export const relayOutbox = async (
   publisher: QueuePublisher,
   batchSize = 100,
@@ -31,9 +48,9 @@ export const relayOutbox = async (
   for (let shard = 0; shard < config.shardCount; shard += 1) {
     const db = getPrisma(shard);
 
-    const result = await db.$transaction(async (tx) => {
-      const claimed = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT id
+    const rows = await db.$transaction(async (tx) => {
+      const claimed = await tx.$queryRaw<OutboxRow[]>`
+        SELECT id, topic, partition_key, payload, headers, attempts
         FROM outbox
         WHERE status = 'pending' AND available_at <= now()
         ORDER BY available_at ASC, id ASC
@@ -42,28 +59,65 @@ export const relayOutbox = async (
       `;
 
       if (claimed.length === 0) {
-        return { published: 0, failed: 0 };
+        return [];
       }
 
-      const ids = claimed.map((row) => row.id);
-      const rows = await tx.outbox.findMany({ where: { id: { in: ids } } });
-      const publishedIds: string[] = [];
-      let localFailed = 0;
+      await tx.outbox.updateMany({
+        where: { id: { in: claimed.map((row) => row.id) } },
+        data: { availableAt: new Date(Date.now() + LEASE_MS) },
+      });
 
-      for (const row of rows) {
-        try {
-          await publisher.publish(
-            row.topic,
-            row.partitionKey,
-            row.payload,
-            headersOf(row.headers),
+      return claimed;
+    });
+
+    if (rows.length === 0) {
+      continue;
+    }
+
+    const byTopic = new Map<string, OutboxRow[]>();
+
+    for (const row of rows) {
+      const group = byTopic.get(row.topic);
+
+      if (group) {
+        group.push(row);
+      } else {
+        byTopic.set(row.topic, [row]);
+      }
+    }
+
+    const publishedIds: string[] = [];
+
+    for (const [topic, group] of byTopic) {
+      try {
+        if (publisher.publishMany) {
+          await publisher.publishMany(
+            topic,
+            group.map((row) => ({
+              key: row.partition_key,
+              payload: row.payload,
+              headers: headersOf(row.headers),
+            })),
           );
-          publishedIds.push(row.id);
-        } catch (error) {
-          localFailed += 1;
+        } else {
+          for (const row of group) {
+            await publisher.publish(
+              topic,
+              row.partition_key,
+              row.payload,
+              headersOf(row.headers),
+            );
+          }
+        }
+
+        publishedIds.push(...group.map((row) => row.id));
+      } catch (error) {
+        failed += group.length;
+
+        for (const row of group) {
           const attempts = row.attempts + 1;
 
-          await tx.outbox.update({
+          await db.outbox.update({
             where: { id: row.id },
             data: {
               attempts,
@@ -74,19 +128,15 @@ export const relayOutbox = async (
           });
         }
       }
+    }
 
-      if (publishedIds.length > 0) {
-        await tx.outbox.updateMany({
-          where: { id: { in: publishedIds } },
-          data: { status: "PUBLISHED", publishedAt: new Date() },
-        });
-      }
-
-      return { published: publishedIds.length, failed: localFailed };
-    });
-
-    published += result.published;
-    failed += result.failed;
+    if (publishedIds.length > 0) {
+      await db.outbox.updateMany({
+        where: { id: { in: publishedIds } },
+        data: { status: "PUBLISHED", publishedAt: new Date() },
+      });
+      published += publishedIds.length;
+    }
   }
 
   return { published, failed };

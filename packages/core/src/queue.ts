@@ -1,7 +1,14 @@
 export type MessageHeaders = Record<string, string | number | boolean | null | undefined>;
 
+export interface QueueBatchMessage {
+  key: string;
+  payload: unknown;
+  headers?: MessageHeaders;
+}
+
 export interface QueuePublisher {
   publish(topic: string, key: string, payload: unknown, headers?: MessageHeaders): Promise<void>;
+  publishMany?(topic: string, messages: readonly QueueBatchMessage[]): Promise<void>;
   disconnect(): Promise<void>;
 }
 
