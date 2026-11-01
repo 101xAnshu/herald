@@ -2,7 +2,7 @@ SHELL := /bin/bash
 COMPOSE := docker compose
 TEST_ENV := DATABASE_URL=postgresql://herald:herald@localhost:5434/herald_test REDIS_URL=redis://localhost:6380 KAFKA_BROKERS=localhost:9093 SMTP_URL=smtp://localhost:1026 PORT=3100
 
-.PHONY: deps up down demo migrate seed seed-load reset test test-integration test-e2e lint typecheck build bench bench-http scenario scenario-timeout scenario-kill scenario-failover drill-db site verify
+.PHONY: deps up down demo migrate seed seed-load reset test test-integration test-e2e lint typecheck build bench bench-http loss-baseline scenario scenario-timeout scenario-kill scenario-failover drill-db site verify
 
 deps:
 	pnpm install
@@ -65,6 +65,9 @@ bench:
 
 bench-http:
 	pnpm bench:http
+
+loss-baseline:
+	pnpm loss:baseline
 
 scenario:
 	@if ! curl -fsS http://localhost:3000/health/ready >/dev/null 2>&1; then $(MAKE) demo; fi

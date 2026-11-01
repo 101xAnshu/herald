@@ -11,3 +11,4 @@ packages/db/src/generated/prisma/
 drill-results/
 bench-results/
 scenario-results/
+loss-results/
