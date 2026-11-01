@@ -10,6 +10,7 @@ import {
 import { loadConfig } from "@herald/config";
 import type {
   MessageHeaders,
+  QueueBatchMessage,
   QueueConsumer,
   QueueConsumerMessage,
   QueuePublisher,
@@ -86,6 +87,30 @@ class KafkaPublisher implements QueuePublisher {
     });
   }
 
+  async publishMany(
+    topic: string,
+    messages: readonly QueueBatchMessage[],
+  ): Promise<void> {
+    if (messages.length === 0) {
+      return;
+    }
+
+    await this.connect();
+
+    await this.producer!.send({
+      topic,
+      acks: -1,
+      messages: messages.map((message) => ({
+        key: message.key,
+        value: JSON.stringify(message.payload),
+        headers: encodeHeaders({
+          ...message.headers,
+          schema_version: message.headers?.schema_version ?? 1,
+        }),
+      })),
+    });
+  }
+
   async disconnect(): Promise<void> {
     await this.producer?.disconnect();
     this.producer = null;
@@ -98,12 +123,14 @@ export interface ConsumerOptions {
   groupId: string;
   topics: string[];
   handler: (message: QueueConsumerMessage) => Promise<void>;
+  partitionsConsumedConcurrently?: number;
 }
 
 export class KafkaConsumer implements QueueConsumer {
   private readonly consumer: Consumer;
   private readonly topics: string[];
   private readonly handler: (message: QueueConsumerMessage) => Promise<void>;
+  private readonly partitionsConsumedConcurrently: number;
 
   constructor(options: ConsumerOptions) {
     this.consumer = createKafka("herald-worker").consumer({
@@ -114,6 +141,7 @@ export class KafkaConsumer implements QueueConsumer {
     });
     this.topics = options.topics;
     this.handler = options.handler;
+    this.partitionsConsumedConcurrently = options.partitionsConsumedConcurrently ?? 1;
   }
 
   async subscribe(): Promise<void> {
@@ -126,6 +154,7 @@ export class KafkaConsumer implements QueueConsumer {
     await this.consumer.run({
       autoCommit: true,
       autoCommitInterval: 1_000,
+      partitionsConsumedConcurrently: this.partitionsConsumedConcurrently,
       eachMessage: async (payload) => {
         const value = payload.message.value?.toString("utf8");
 
@@ -159,23 +188,36 @@ export const ensureTopics = async (partitions = 6): Promise<void> => {
   await admin.connect();
 
   try {
-    await admin.createTopics({
-      waitForLeaders: true,
-      topics: ALL_TOPICS.map((topic) => ({
-        topic,
-        numPartitions: partitions,
-        replicationFactor: 1,
-        configEntries: [{ name: "retention.ms", value: String(topicRetention(topic)) }],
-      })),
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    const ignorable =
-      message.includes("Topic with this name already exists") ||
-      ("type" in Object(error) && (error as { type?: string }).type === "TOPIC_ALREADY_EXISTS");
+    try {
+      await admin.createTopics({
+        waitForLeaders: true,
+        topics: ALL_TOPICS.map((topic) => ({
+          topic,
+          numPartitions: partitions,
+          replicationFactor: 1,
+          configEntries: [{ name: "retention.ms", value: String(topicRetention(topic)) }],
+        })),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      const ignorable =
+        message.includes("Topic with this name already exists") ||
+        ("type" in Object(error) && (error as { type?: string }).type === "TOPIC_ALREADY_EXISTS");
 
-    if (!ignorable) {
-      throw error;
+      if (!ignorable) {
+        throw error;
+      }
+    }
+
+    const metadata = await admin.fetchTopicMetadata({ topics: ALL_TOPICS });
+    const short = metadata.topics.filter(
+      (topic) => (ALL_TOPICS as readonly string[]).includes(topic.name) && topic.partitions.length < partitions,
+    );
+
+    if (short.length > 0) {
+      await admin.createPartitions({
+        topicPartitions: short.map((topic) => ({ topic: topic.name, count: partitions })),
+      });
     }
   } finally {
     await admin.disconnect();

@@ -1,5 +1,6 @@
 import type { EventEnvelope } from "@herald/contracts";
 import { EventEnvelopeSchema } from "@herald/contracts";
+import { loadConfig } from "@herald/config";
 import { AppError, dedupeKey } from "@herald/core";
 import { orchestrateNotification } from "@herald/db";
 import { KafkaConsumer, consumerGroup, eventsTopic } from "@herald/queue";
@@ -19,6 +20,7 @@ export const createOrchestratorConsumers = (priorities: Priority[]): KafkaConsum
     return new KafkaConsumer({
       groupId: consumerGroup("orchestrator", priority),
       topics: [topic],
+      partitionsConsumedConcurrently: loadConfig().consumerConcurrency,
       handler: async (message) => {
         const parsed = EventEnvelopeSchema.safeParse(message.value);
 
@@ -54,15 +56,18 @@ export const createOrchestratorConsumers = (priorities: Priority[]): KafkaConsum
               .catch(() => undefined);
           }
 
-          logger.info(
-            {
-              trace_id: event.trace_id,
-              notification_id: event.notification_id,
-              status: result.status,
-              channels: result.channels,
-            },
-            "orchestrated notification",
-          );
+          const fields = {
+            trace_id: event.trace_id,
+            notification_id: event.notification_id,
+            status: result.status,
+            channels: result.channels,
+          };
+
+          if (result.status === "processing") {
+            logger.debug(fields, "orchestrated notification");
+          } else {
+            logger.info(fields, "orchestrated notification");
+          }
         } catch (error) {
           if (error instanceof AppError && error.code === "not_found") {
             logger.warn(

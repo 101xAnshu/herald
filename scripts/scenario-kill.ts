@@ -89,7 +89,7 @@ const main = async (): Promise<void> => {
     throw new Error(`API is not ready; run make demo (${ready.status})`);
   }
 
-  compose(["up", "-d", "worker"]);
+  compose(["up", "-d", "worker", "worker-delivery"]);
   await sleep(2_000);
 
   const runId = Date.now();
@@ -122,11 +122,11 @@ const main = async (): Promise<void> => {
 
   await sleep(250);
   const killAt = Date.now();
-  compose(["kill", "--signal", "SIGKILL", "worker"]);
+  compose(["kill", "--signal", "SIGKILL", "worker", "worker-delivery"]);
 
   await sleep(1_000);
   const restartAt = Date.now();
-  compose(["start", "worker"]);
+  compose(["start", "worker", "worker-delivery"]);
 
   const traces = await waitFor(
     "all notifications to reach a terminal state",
@@ -227,7 +227,7 @@ main()
   })
   .finally(() => {
     try {
-      compose(["start", "worker"]);
+      compose(["start", "worker", "worker-delivery"]);
     } catch {
       // The worker is already running or Docker is unavailable.
     }

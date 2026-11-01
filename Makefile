@@ -20,7 +20,7 @@ demo: deps
 	pnpm --filter @herald/db exec prisma migrate deploy
 	pnpm --filter @herald/db prisma:seed
 	pnpm build
-	$(COMPOSE) up -d --build api worker
+	$(COMPOSE) up -d --build api worker worker-delivery
 	./scripts/wait-for.sh http://localhost:3000/health/ready 180
 	pnpm herald init --demo
 	@echo ""
@@ -68,13 +68,13 @@ bench-http:
 
 scenario:
 	@if ! curl -fsS http://localhost:3000/health/ready >/dev/null 2>&1; then $(MAKE) demo; fi
-	$(COMPOSE) up -d worker
+	$(COMPOSE) up -d worker worker-delivery
 	pnpm scenario:timeout
 	pnpm scenario:kill
 
 scenario-timeout:
 	@if ! curl -fsS http://localhost:3000/health/ready >/dev/null 2>&1; then $(MAKE) demo; fi
-	$(COMPOSE) up -d worker
+	$(COMPOSE) up -d worker worker-delivery
 	pnpm scenario:timeout
 
 scenario-kill:

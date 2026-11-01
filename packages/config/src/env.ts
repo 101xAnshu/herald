@@ -38,6 +38,8 @@ const envSchema = z.object({
   REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
   KAFKA_BROKERS: z.string().min(1).default("localhost:9092"),
   KAFKA_PARTITIONS: z.coerce.number().int().min(1).default(6),
+  PROVIDER_RATE_LIMIT: z.coerce.number().int().min(1).default(200),
+  CONSUMER_CONCURRENCY: z.coerce.number().int().min(1).max(100).default(8),
   WORKER_ROLES: z.string().default(WORKER_ROLES.join(",")),
 
   SMTP_URL: z.string().min(1).default("smtp://localhost:1025"),
@@ -72,6 +74,8 @@ export interface HeraldConfig {
   readonly redisUrl: string;
   readonly kafkaBrokers: readonly string[];
   readonly kafkaPartitions: number;
+  readonly providerRateLimit: number;
+  readonly consumerConcurrency: number;
   readonly workerRoles: readonly WorkerRole[];
   readonly smtpUrl: string;
   readonly mailpitUrl: string;
@@ -171,6 +175,8 @@ export const parseConfig = (source: NodeJS.ProcessEnv = process.env): HeraldConf
         .filter(Boolean),
     ),
     kafkaPartitions: env.KAFKA_PARTITIONS,
+    providerRateLimit: env.PROVIDER_RATE_LIMIT,
+    consumerConcurrency: env.CONSUMER_CONCURRENCY,
     workerRoles: Object.freeze(parseRoles(env.WORKER_ROLES)),
     smtpUrl: env.SMTP_URL,
     mailpitUrl: env.MAILPIT_URL,

@@ -59,7 +59,7 @@ if [[ -z "${LAG:-}" || "$LAG" == "999" ]]; then
 fi
 
 echo "3/7 stop application writers"
-docker compose stop api worker >/dev/null 2>&1 || true
+docker compose stop api worker worker-delivery >/dev/null 2>&1 || true
 
 echo "4/7 promote the standby"
 PROMOTE_START=$(date +%s)
@@ -75,8 +75,8 @@ done
 PROMOTE_END=$(date +%s)
 RTO=$((PROMOTE_END - PROMOTE_START))
 
-echo "5/7 start the API and worker against the promoted node"
-"${COMPOSE[@]}" up -d api-dr worker-dr >/dev/null
+echo "5/7 start the API and workers against the promoted node"
+"${COMPOSE[@]}" up -d api-dr worker-dr worker-delivery-dr >/dev/null
 
 for _ in $(seq 1 60); do
   if curl -fsS http://localhost:3001/health/live >/dev/null 2>&1; then

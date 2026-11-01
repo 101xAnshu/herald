@@ -20,6 +20,7 @@ services:
         condition: service_healthy
 
   api-dr:
+    image: herald-api:latest
     build:
       context: .
       dockerfile: apps/api/Dockerfile
@@ -28,7 +29,7 @@ services:
       PORT: 3000
       API_WORKERS: ${API_WORKERS:-1}
       DATABASE_URL: postgresql://herald:herald@postgres-standby:5432/herald
-      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      DB_POOL_MAX: ${DB_POOL_MAX:-15}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:19092
       SMTP_URL: smtp://mailpit:1025
@@ -43,13 +44,17 @@ services:
       - postgres-standby
 
   worker-dr:
+    image: herald-worker-dr:latest
     build:
       context: .
       dockerfile: apps/worker/Dockerfile
     environment:
       NODE_ENV: development
+      WORKER_ROLES: relay,orchestrator,scheduler,reconciler,campaign,retention
+      KAFKA_PARTITIONS: ${KAFKA_PARTITIONS:-24}
+      CONSUMER_CONCURRENCY: ${CONSUMER_CONCURRENCY:-16}
       DATABASE_URL: postgresql://herald:herald@postgres-standby:5432/herald
-      DB_POOL_MAX: ${DB_POOL_MAX:-20}
+      DB_POOL_MAX: ${WORKER_DB_POOL_MAX:-10}
       REDIS_URL: redis://redis:6379
       KAFKA_BROKERS: kafka:19092
       SMTP_URL: smtp://mailpit:1025
@@ -58,6 +63,32 @@ services:
       API_KEY_PEPPER: ${API_KEY_PEPPER:-local-development-api-key-pepper}
       WEBHOOK_SECRET: ${WEBHOOK_SECRET:-local-development-webhook-secret}
       DEMO_MODE: "true"
+    depends_on:
+      - postgres-standby
+
+  worker-delivery-dr:
+    image: herald-worker-dr:latest
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      NODE_ENV: development
+      WORKER_ROLES: delivery
+      KAFKA_PARTITIONS: ${KAFKA_PARTITIONS:-24}
+      CONSUMER_CONCURRENCY: ${CONSUMER_CONCURRENCY:-16}
+      PROVIDER_RATE_LIMIT: ${PROVIDER_RATE_LIMIT:-600}
+      DATABASE_URL: postgresql://herald:herald@postgres-standby:5432/herald
+      DB_POOL_MAX: ${DELIVERY_DB_POOL_MAX:-10}
+      REDIS_URL: redis://redis:6379
+      KAFKA_BROKERS: kafka:19092
+      SMTP_URL: smtp://mailpit:1025
+      MAILPIT_URL: http://mailpit:8025
+      JWT_SECRET: ${JWT_SECRET:-local-development-jwt-secret}
+      API_KEY_PEPPER: ${API_KEY_PEPPER:-local-development-api-key-pepper}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-local-development-webhook-secret}
+      DEMO_MODE: "true"
+    deploy:
+      replicas: ${DELIVERY_WORKERS:-3}
     depends_on:
       - postgres-standby
 
