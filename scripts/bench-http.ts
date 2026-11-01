@@ -315,7 +315,7 @@ ${reachedTarget(result.requests.average, options.rate) ? "" : "The API did not r
     );
   }
 
-  const path = resolve(process.cwd(), "docs/BENCH-HTTP.md");
+  const path = resolve(process.cwd(), option("output", "docs/BENCH-HTTP.md"));
   writeFileSync(path, report);
   process.stdout.write(report);
   process.stdout.write(`\nwrote ${path}\n`);

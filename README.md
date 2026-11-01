@@ -326,6 +326,8 @@ With `API_WORKERS=4`, `DB_POOL_MAX=30`, the tuned Postgres settings in `compose.
 
 A separate closed-loop Node client recorded 516 events/s with the same load settings, p50 10.6 ms, p95 77.2 ms, and p99 493.7 ms. Its lower p50 is service time, not queue time. Its p99 is worse because the client, not the API, saturates first. See `docs/BENCH.md`.
 
+A full-pipeline run with the worker active is documented in `docs/BENCH-PIPELINE.md`. It did not sustain 50 events/s on this laptop. The worker saturated one CPU core and the backlog grew. This is separate from the ingest-only benchmark.
+
 The 1,000 events/s target was not reached. At a 1,000 target the API accepted about 729 events/s with p99 180 ms in the best run, and the tail moved between 130 and 443 ms across repeated runs. The system is close to the CPU limit of this laptop, not to a configurable bottleneck. With four API workers, `/metrics` reports one worker's registry, not the sum; `/v1/ops/stats` reads the database and stays aggregate.
 
 ## Deliberate limits
