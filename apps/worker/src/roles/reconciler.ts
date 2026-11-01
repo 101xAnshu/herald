@@ -9,7 +9,7 @@ export const runReconcilerLoop = async (signal: AbortSignal): Promise<void> => {
     const started = process.hrtime.bigint();
 
     try {
-      const result = await reconcileUnknownDeliveries(resolver, { olderThanSeconds: 30 });
+      const result = await reconcileUnknownDeliveries(resolver, { olderThanSeconds: 2 });
       jobDuration.observe({ job: "reconciler" }, Number(process.hrtime.bigint() - started) / 1e9);
       jobLastSuccess.labels("reconciler", "all").set(Math.floor(Date.now() / 1000));
 
@@ -20,6 +20,6 @@ export const runReconcilerLoop = async (signal: AbortSignal): Promise<void> => {
       logger.error({ err: error }, "reconciler tick failed");
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 30_000));
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
 };

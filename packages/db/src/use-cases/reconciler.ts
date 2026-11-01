@@ -1,13 +1,20 @@
+import type { DeliveryMessage } from "@herald/contracts";
 import {
   aggregateNotificationStatus,
   newId,
   type ProviderStatusResolver,
 } from "@herald/core";
 import { loadConfig } from "@herald/config";
+import type { Prisma } from "../generated/prisma/client";
 import { getPrisma } from "../prisma";
+import { shardForUser } from "../shard";
 import {
+  channelFromDb,
   deliveryStatusFromDb,
+  errorClassToDb,
   notificationStatusToDb,
+  priorityFromDb,
+  sourceFromDb,
 } from "../mappers";
 import { syncRecipientStatus } from "./campaigns";
 
@@ -56,14 +63,53 @@ export const reconcileUnknownDeliveries = async (
       }
 
       await db.$transaction(async (tx) => {
+        const now = new Date();
+        const priority = priorityFromDb(delivery.notification.priority);
+        const shard = shardForUser(delivery.userId, config.shardCount);
+
         await tx.delivery.update({
           where: { id: delivery.id },
           data: {
             status: outcome.state === "accepted" ? "ACCEPTED" : outcome.state === "delivered" ? "DELIVERED" : "FAILED",
-            deliveredAt: outcome.state === "delivered" ? new Date() : null,
-            failedAt: outcome.state === "failed" ? new Date() : null,
+            deliveredAt: outcome.state === "delivered" ? now : null,
+            failedAt: outcome.state === "failed" ? now : null,
           },
         });
+
+        if (outcome.state === "failed") {
+          const payload: DeliveryMessage = {
+            delivery_id: delivery.id,
+            notification_id: delivery.notificationId,
+            user_id: delivery.userId,
+            channel: channelFromDb(delivery.channel),
+            priority,
+            source: sourceFromDb(delivery.notification.source),
+            trace_id: delivery.notification.traceId,
+            shard,
+          };
+
+          await tx.deadLetter.create({
+            data: {
+              id: newId(),
+              topic: `herald.deliveries.${priority}.v1`,
+              deliveryId: delivery.id,
+              notificationId: delivery.notificationId,
+              payload: payload as unknown as Prisma.InputJsonValue,
+              headers: {
+                trace_id: delivery.notification.traceId,
+                notification_id: delivery.notificationId,
+                delivery_id: delivery.id,
+                priority,
+                source: sourceFromDb(delivery.notification.source),
+                shard,
+              },
+              attempts: delivery.attemptCount,
+              errorClass: errorClassToDb(outcome.errorClass ?? "permanent"),
+              errorCode: outcome.errorCode ?? "reconcile_failed",
+              createdAt: now,
+            },
+          });
+        }
 
         await tx.notificationEvent.create({
           data: {
