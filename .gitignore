@@ -10,3 +10,4 @@ packages/db/src/generated/prisma/
 .herald/
 drill-results/
 bench-results/
+scenario-results/

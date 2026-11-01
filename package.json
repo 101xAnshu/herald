@@ -31,7 +31,9 @@
     "bench": "tsx scripts/bench.ts",
     "drill:db": "./scripts/drill-db.sh",
     "site": "python3 -m http.server 8080 --directory site",
-    "bench:http": "tsx scripts/bench-http.ts"
+    "bench:http": "tsx scripts/bench-http.ts",
+    "scenario:timeout": "tsx scripts/scenario-timeout.ts",
+    "scenario:kill": "tsx scripts/scenario-kill.ts"
   },
   "devDependencies": {
     "@types/autocannon": "^7.12.7",

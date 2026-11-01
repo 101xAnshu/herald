@@ -305,12 +305,18 @@ make test-integration     # disposable compose.test.yml stack plus smoke test
 make test-e2e             # smoke test against the running stack
 make bench                # business-path benchmark, writes docs/BENCH.md
 make bench-http           # autocannon HTTP benchmark, writes docs/BENCH-HTTP.md
+make scenario             # timeout to DLQ to replay, plus a SIGKILL worker test
+make scenario-timeout     # only the timeout and replay path
+make scenario-kill        # only the worker kill and recovery path
+make scenario-failover    # the Postgres failover drill
 make verify               # build, lint, typecheck, unit tests, smoke test
 ```
 
 ## Scale
 
 The demo profile is sized for a laptop: one Postgres shard, one Kafka broker, one Redis, one API container with four Node workers, and one worker process.
+
+`make scenario` runs the failure paths without extra setup. The timeout scenario takes about 4.3 seconds to reach recovery. The worker kill scenario recovered 24 notifications in about 32.5 seconds. Both write reports under `scenario-results/`, which is ignored by git. See `docs/SCENARIO.md`.
 
 The design envelope is 10M events per day locally and 300M events per day with 12 Postgres shards and 48 Kafka partitions per priority topic. `docs/CAPACITY.md` gives the throughput math, storage estimates, and cost assumptions. The capacity numbers are estimates, not a benchmark claim.
 

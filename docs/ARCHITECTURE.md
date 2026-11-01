@@ -187,7 +187,9 @@ The scheduler uses a Postgres advisory lock per shard. It promotes:
 - Deferred notifications into event messages.
 - Scheduled campaigns into `running`.
 
-The reconciler only inspects deliveries in `unknown` for at least 30 seconds. The mock status resolver confirms mock provider IDs. A delivery without a provider message ID fails reconciliation with a permanent `missing_provider_id` code.
+The reconciler inspects deliveries in `unknown` every second and only considers them after two seconds. The mock status resolver confirms mock provider IDs. A delivery without a provider message ID fails reconciliation with a permanent `missing_provider_id` code and writes a DLQ row.
+
+The scheduler also recovers work that Postgres holds but Kafka no longer delivers. Every second it reclaims `pending`, `sending`, and `retry_scheduled` deliveries older than 30 seconds, and it republishes `accepted` notifications without a fanout plan that are older than 30 seconds. A crash between commit and offset commit therefore becomes a retry, not a stuck notification.
 
 ## Retention
 

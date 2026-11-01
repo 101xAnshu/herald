@@ -121,3 +121,11 @@ Short records for the choices that shape the build.
 **Why.** The first optimization cached these reads for 1 to 5 seconds. That cut database work but let a revoked key or paused source stay active until the TTL expired. Pub/sub removes that window without adding a per-request read.
 
 **Consequence.** If Redis is unavailable, invalidation falls back to the TTL. The API key cache can still outlive a revocation by the TTL in that failure mode. Event type and source changes are immediate while Redis is healthy.
+
+## ADR-016: Recover lost queue work from Postgres
+
+**Decision.** The scheduler reclaims deliveries stuck in `pending`, `sending`, or `retry_scheduled` for 30 seconds, and republishes accepted notifications with no fanout plan after 30 seconds.
+
+**Why.** Kafka offsets can advance across messages that were published but not processed before a worker crash. The notification and outbox rows are already durable, so Postgres can rebuild the missing work.
+
+**Consequence.** A delivery can be attempted more than once. The delivery claim and provider idempotency key make the retry harmless. The recovery adds one scheduler query per second per shard.
