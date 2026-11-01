@@ -48,18 +48,24 @@ Compose on the same machine.
 | Notifications lost | 0 |
 | End-to-end p50, p95, p99 | 3.90 s, 11.55 s, 13.90 s |
 | Fanout p50, p95 | 2.51 s, 9.23 s |
-| Delivery attempts | 71,052 |
-| Delivery attempts per second | 114.6 |
+| Channel deliveries | 71,052 (2.33 per notification) |
+| Channel deliveries per second | 114.6 |
 | Outbox publish p50, p95, p99 | 0.32 s, 0.83 s, 1.95 s |
 | Outbox publish max | 3.29 s |
 | Max outbox pending | 157 rows |
 | Max notifications awaiting fanout | 502 |
+| Retries scheduled | 0 |
 | DLQ depth | 0 |
 | Notifications still open after the load | 0 |
 
 Every accepted request produced exactly one notification, and every notification
 reached a terminal state. The queue was empty when the run ended, so the rate was
 sustained, not borrowed from backlog.
+
+The delivery count is larger than the notification count because one booking fans
+out to email, in-app, and push. It is not a retry count. The average was 2.33
+channels per notification, and the run recorded zero scheduled retries and zero
+DLQ rows.
 
 CPU during the run, as a percentage of one core:
 
@@ -90,7 +96,7 @@ the drain rate and leaves a short queue. 70 events/s exceeds capacity: the backl
 grows during the run and takes about as long as the run to clear.
 
 At 50 events/s the pipeline moves 4.3M events per day. Each event produced about
-2.33 deliveries, so that is roughly 10M delivery attempts per day. This is a
+2.33 channel deliveries, so that is roughly 10M delivery attempts per day. This is a
 laptop measurement, not a production claim.
 
 ## What limited it before
@@ -127,6 +133,8 @@ The causes, in the order they were found:
 
 ## Reading the numbers
 
+- The event-loss comparison against a dual-write baseline is in
+  `docs/BENCH-LOSS.md`. It is a separate experiment and does not reuse these rows.
 - The end-to-end latency includes queue time. At 50 events/s the p50 is under
   4 seconds and the p95 is about 12 seconds. At 60 events/s the tail grows.
 - Postgres is the largest consumer at about 1.6 cores. The next step for more

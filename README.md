@@ -305,6 +305,7 @@ make test-integration     # disposable compose.test.yml stack plus smoke test
 make test-e2e             # smoke test against the running stack
 make bench                # business-path benchmark, writes docs/BENCH.md
 make bench-http           # autocannon HTTP benchmark, writes docs/BENCH-HTTP.md
+make loss-baseline        # dual write vs outbox under random SIGKILL
 make scenario             # timeout to DLQ to replay, plus a SIGKILL worker test
 make scenario-timeout     # only the timeout and replay path
 make scenario-kill        # only the worker kill and recovery path
@@ -326,7 +327,9 @@ With `API_WORKERS=4`, `DB_POOL_MAX=30`, the tuned Postgres settings in `compose.
 
 A separate closed-loop Node client recorded 516 events/s with the same load settings, p50 10.6 ms, p95 77.2 ms, and p99 493.7 ms. Its lower p50 is service time, not queue time. Its p99 is worse because the client, not the API, saturates first. See `docs/BENCH.md`.
 
-The full pipeline is benchmarked separately in `docs/BENCH-PIPELINE.md`. With all three channels active, 24 Kafka partitions, one core worker, and three delivery workers, the pipeline sustained 50 events/s for 10 minutes: 29,989 requests, zero errors, zero lost notifications, p95 end-to-end 11.6 seconds, and an empty queue at the end. 60 events/s runs just ahead of the drain rate; 70 events/s exceeds capacity on this laptop. Postgres, not the relay, is the first limit.
+The full pipeline is benchmarked separately in `docs/BENCH-PIPELINE.md`. With all three channels active, 24 Kafka partitions, one core worker, and three delivery workers, the pipeline sustained 50 events/s for 10 minutes: 29,989 requests, zero errors, zero lost notifications, p95 end-to-end 11.6 seconds, and an empty queue at the end. That is 4.3M events per day end to end, or about 10M channel deliveries per day. The 71,052 deliveries in the run come from the three-channel fanout, not from retries; the run recorded zero scheduled retries and zero DLQ rows. 60 events/s runs just ahead of the drain rate; 70 events/s exceeds capacity on this laptop. Postgres, not the relay, is the first limit.
+
+A separate crash test compares the outbox with a dual write. Over twenty random `SIGKILL`s, the dual-write version lost 10 of 712 accepted events. The outbox version lost 0 of 656. The report is in `docs/BENCH-LOSS.md`.
 
 The 1,000 events/s target was not reached. At a 1,000 target the API accepted about 729 events/s with p99 180 ms in the best run, and the tail moved between 130 and 443 ms across repeated runs. The system is close to the CPU limit of this laptop, not to a configurable bottleneck. With four API workers, `/metrics` reports one worker's registry, not the sum; `/v1/ops/stats` reads the database and stays aggregate.
 
